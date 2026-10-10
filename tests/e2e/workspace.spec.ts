@@ -28,6 +28,50 @@ async function openCard(page: Page, title: string) {
     .filter({ has: page.getByRole("heading", { name: title, exact: true }) })
     .click();
 }
+test("카드 검색은 내용·메모·상태를 함께 찾고 저장 데이터와 진행률을 유지한다", async ({
+  page,
+}) => {
+  await newProject(page);
+  await newCard(page, "LOGIN 화면");
+  await newCard(page, "백업 작업", "done");
+  await openCard(page, "LOGIN 화면");
+  await page.getByLabel("한 일", { exact: true }).fill("기본 폼 완료");
+  await page.getByLabel("막힌 점", { exact: true }).fill("OAuth 설정");
+  await page.getByLabel("다음 할 일", { exact: true }).fill("서버 연결");
+  await page.getByRole("button", { name: "메모 저장", exact: true }).click();
+  await page.getByRole("button", { name: "카드 수정", exact: true }).click();
+  await page.getByLabel("작업 설명", { exact: true }).fill("기기별 인증");
+  await page.getByRole("button", { name: "변경 저장", exact: true }).click();
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  const stored = await page.evaluate(() => localStorage.getItem("with-ai:data:v1"));
+  const search = page.getByRole("searchbox", { name: "작업 검색" });
+  for (const term of ["  login  ", "기기별", "기본 폼", "oauth", "서버 연결"]) {
+    await search.fill(term);
+    await expect(page.locator(".task-card")).toHaveCount(1);
+    await expect(page.locator(".task-card")).toContainText("LOGIN 화면");
+    await expect(page.getByText("검색 결과 1개", { exact: true })).toBeVisible();
+  }
+  await page.getByRole("button", { name: /^완료\s*1$/ }).click();
+  await expect(page.getByText("검색 결과가 없어요", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "검색·필터 초기화", exact: true }).click();
+  await expect(search).toHaveValue("");
+  await expect(page.locator(".task-card")).toHaveCount(2);
+  for (const term of ["모바일 사용", "실행 확인", "   "]) {
+    await search.fill(term);
+    await expect(page.locator(".task-card")).toHaveCount(2);
+  }
+  await search.fill("없는 검색어");
+  await page.getByRole("button", { name: "검색어 지우기", exact: true }).click();
+  await expect(search).toHaveValue("");
+  await expect(search).toBeFocused();
+  await expect(page.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "50");
+  expect(await page.evaluate(() => localStorage.getItem("with-ai:data:v1"))).toBe(stored);
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect(search).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  }
+});
 test("모바일 CRUD, 메모, 필터, 집계, 지속 저장, 요청문, 백업 교체", async ({
   page,
   context,

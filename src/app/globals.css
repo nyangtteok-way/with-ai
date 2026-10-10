@@ -475,6 +475,53 @@ select {
   padding-left: 0;
   padding-right: 0;
 }
+.card-search {
+  margin-bottom: 18px;
+}
+.card-search > label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+  font-size: 12px;
+}
+.card-search-input {
+  position: relative;
+}
+.card-search-input > svg {
+  position: absolute;
+  top: 15px;
+  left: 14px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.card-search-input > input {
+  padding-left: 42px;
+  padding-right: 48px;
+  min-height: 48px;
+  font-size: 16px;
+  background: #fff;
+}
+.card-search-input > input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+.card-search-input > button {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+}
+.card-search > p {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
 .filters {
   display: flex;
   flex-wrap: wrap;

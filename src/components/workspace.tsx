@@ -14,6 +14,7 @@ import {
   Layers3,
   MoreHorizontal,
   Plus,
+  Search,
   Settings2,
   ShieldCheck,
   Sparkles,
@@ -68,16 +69,32 @@ export function Workspace() {
   const { data, ready, error } = useAppStore();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [filter, setFilter] = useState<Status | "all">("all");
+  const [search, setSearch] = useState("");
   const [modal, setModal] = useState<Modal>(null);
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(
     null,
   );
   const fileRef = useRef<HTMLInputElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const project =
     data.projects.find((p) => p.id === activeId) ?? data.projects[0];
   const summary = summarize(project?.cards ?? []);
+  const searchTerm = search.trim().toLowerCase();
   const cards =
-    project?.cards.filter((c) => filter === "all" || c.status === filter) ?? [];
+    project?.cards.filter(
+      (c) =>
+        (filter === "all" || c.status === filter) &&
+        (!searchTerm ||
+          [
+            c.title,
+            c.description,
+            c.requirements,
+            c.acceptance,
+            c.note.done,
+            c.note.blocked,
+            c.note.next,
+          ].some((value) => value.toLowerCase().includes(searchTerm))),
+    ) ?? [];
   const selectedCard =
     modal && "cardId" in modal
       ? project?.cards.find((c) => c.id === modal.cardId)
@@ -97,6 +114,7 @@ export function Workspace() {
   function selectProject(id: string) {
     setActiveId(id);
     setFilter("all");
+    setSearch("");
     setModal(null);
   }
   function saveProject(name: string, description: string) {
@@ -206,6 +224,7 @@ export function Workspace() {
     ) {
       setModal(null);
       setFilter("all");
+      setSearch("");
     }
   }
   function removeCard(id: string) {
@@ -472,6 +491,38 @@ export function Workspace() {
                     <Plus size={18} />새 작업 카드
                   </button>
                 </div>
+                <div className="card-search">
+                  <label htmlFor="card-search">작업 검색</label>
+                  <div className="card-search-input">
+                    <Search size={18} aria-hidden="true" />
+                    <input
+                      id="card-search"
+                      ref={searchRef}
+                      type="search"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="제목, 내용, 진행 메모 검색"
+                      autoComplete="off"
+                    />
+                    {search && (
+                      <button
+                        type="button"
+                        aria-label="검색어 지우기"
+                        onClick={() => {
+                          setSearch("");
+                          searchRef.current?.focus();
+                        }}
+                      >
+                        <X size={18} />
+                      </button>
+                    )}
+                  </div>
+                  <p role="status" aria-live="polite" aria-atomic="true">
+                    {searchTerm
+                      ? `검색 결과 ${cards.length}개`
+                      : "제목부터 진행 메모까지 한 번에 찾아보세요."}
+                  </p>
+                </div>
                 <div
                   className="filters"
                   role="group"
@@ -532,27 +583,36 @@ export function Workspace() {
                       <Layers3 size={28} />
                     </span>
                     <h3>
-                      {project.cards.length
-                        ? "이 상태의 작업은 아직 없어요"
-                        : "첫 번째 할 일을 적어 볼까요?"}
+                      {searchTerm
+                        ? "검색 결과가 없어요"
+                        : project.cards.length
+                          ? "이 상태의 작업은 아직 없어요"
+                          : "첫 번째 할 일을 적어 볼까요?"}
                     </h3>
                     <p>
-                      {project.cards.length
-                        ? "다른 상태를 선택해 작업을 확인하세요."
-                        : "아이디어를 작은 작업으로 나누면 시작하기 쉬워져요."}
+                      {searchTerm
+                        ? "검색어를 바꾸거나 상태 필터를 확인해 주세요."
+                        : project.cards.length
+                          ? "다른 상태를 선택해 작업을 확인하세요."
+                          : "아이디어를 작은 작업으로 나누면 시작하기 쉬워져요."}
                     </p>
                     <button
                       className="button secondary"
                       disabled={!!error}
-                      onClick={() =>
-                        project.cards.length
-                          ? setFilter("all")
-                          : setModal({ kind: "card" })
-                      }
+                      onClick={() => {
+                        if (searchTerm || project.cards.length) {
+                          setSearch("");
+                          setFilter("all");
+                        } else {
+                          setModal({ kind: "card" });
+                        }
+                      }}
                     >
-                      {project.cards.length
-                        ? "전체 작업 보기"
-                        : "첫 작업 카드 만들기"}
+                      {searchTerm
+                        ? "검색·필터 초기화"
+                        : project.cards.length
+                          ? "전체 작업 보기"
+                          : "첫 작업 카드 만들기"}
                       <Plus size={17} />
                     </button>
                   </div>
@@ -866,6 +926,7 @@ export function Workspace() {
                 if (persist(modal.data, "백업 데이터를 가져왔어요.", true)) {
                   setActiveId(null);
                   setFilter("all");
+                  setSearch("");
                   setModal(null);
                 }
               }}
