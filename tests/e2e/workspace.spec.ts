@@ -294,4 +294,9 @@ test("저장 실패는 성공으로 표시하지 않고 입력 내용을 유지�
   );
   await expect(page.getByLabel("작업 제목")).toHaveValue("유지할 입력");
   await expect(page.locator(".task-card")).toHaveCount(0);
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  const confirm = page.getByRole("dialog", { name: "작성 중인 내용을 버릴까요?" });
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole("button", { name: "계속 작성" }).click();
+  await expect(page.getByLabel("작업 제목")).toHaveValue("유지할 입력");
 });

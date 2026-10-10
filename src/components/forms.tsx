@@ -1,6 +1,7 @@
 "use client";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Check, Copy, FileText, Pencil, Sparkles, Trash2 } from "lucide-react";
+import { useUnsavedChanges } from "./use-unsaved-changes";
 import {
   Card,
   Project,
@@ -86,14 +87,24 @@ export function ProjectForm({
   project,
   onSave,
   onClose,
+  onDirtyChange,
 }: {
   project?: Project;
   onSave: (name: string, description: string) => boolean;
   onClose: () => void;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
-  const [name, setName] = useState(project?.name ?? "");
-  const [description, setDescription] = useState(project?.description ?? "");
+  const [initial] = useState(() => ({
+    name: project?.name ?? "",
+    description: project?.description ?? "",
+  }));
+  const [name, setName] = useState(initial.name);
+  const [description, setDescription] = useState(initial.description);
   const [error, setError] = useState("");
+  useUnsavedChanges(
+    name !== initial.name || description !== initial.description,
+    onDirtyChange,
+  );
   function submit(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) {
@@ -140,19 +151,28 @@ export function CardForm({
   card,
   onSave,
   onClose,
+  onDirtyChange,
 }: {
   card?: Card;
   onSave: (fields: CardFields) => boolean;
   onClose: () => void;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
-  const [fields, setFields] = useState<CardFields>({
+  const [initial] = useState<CardFields>(() => ({
     title: card?.title ?? "",
     description: card?.description ?? "",
     requirements: card?.requirements ?? "",
     acceptance: card?.acceptance ?? "",
     status: card?.status ?? "todo",
-  });
+  }));
+  const [fields, setFields] = useState(initial);
   const [error, setError] = useState("");
+  useUnsavedChanges(
+    (Object.keys(initial) as (keyof CardFields)[]).some(
+      (key) => fields[key] !== initial[key],
+    ),
+    onDirtyChange,
+  );
   function update(key: keyof CardFields, value: string) {
     setFields((f) => ({ ...f, [key]: value }));
     if (key === "title") setError("");
@@ -244,6 +264,7 @@ export function CardDetail({
   onDelete,
   onNoteSave,
   onPrompt,
+  onDirtyChange,
 }: {
   card: Card;
   onEdit: () => void;
@@ -252,6 +273,7 @@ export function CardDetail({
     note: Pick<Card["note"], "done" | "blocked" | "next">,
   ) => boolean;
   onPrompt: () => void;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const [note, setNote] = useState({
     done: card.note.done,
@@ -262,6 +284,7 @@ export function CardDetail({
     note.done !== card.note.done ||
     note.blocked !== card.note.blocked ||
     note.next !== card.note.next;
+  useUnsavedChanges(dirty, onDirtyChange);
   return (
     <>
       <div className="detail-toolbar">
@@ -358,15 +381,21 @@ export function CardDetail({
 export function PromptEditor({
   project,
   card,
+  onDirtyChange,
 }: {
   project: Project;
   card: Card;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
-  const [prompt, setPrompt] = useState(() => generatePrompt(project, card));
+  const [initial] = useState(() => generatePrompt(project, card));
+  const [prompt, setPrompt] = useState(initial);
+  const [copiedPrompt, setCopiedPrompt] = useState<string | null>(null);
   const [result, setResult] = useState<"success" | "failed" | null>(null);
+  useUnsavedChanges(prompt !== initial && prompt !== copiedPrompt, onDirtyChange);
   async function copy() {
     try {
       await navigator.clipboard.writeText(prompt);
+      setCopiedPrompt(prompt);
       setResult("success");
     } catch {
       setResult("failed");

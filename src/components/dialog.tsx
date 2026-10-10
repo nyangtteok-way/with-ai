@@ -1,6 +1,10 @@
 "use client";
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
+
+let openDialogs = 0;
+let bodyOverflow = "";
+
 export function Dialog({
   title,
   subtitle,
@@ -21,13 +25,19 @@ export function Dialog({
   useEffect(() => {
     const dialog = ref.current!;
     const previous = document.activeElement as HTMLElement | null;
-    const previousOverflow = document.body.style.overflow;
+    if (openDialogs === 0) bodyOverflow = document.body.style.overflow;
+    openDialogs += 1;
     document.body.style.overflow = "hidden";
     dialog.showModal();
+    dialog.querySelector<HTMLElement>("[data-dialog-autofocus]")?.focus();
     return () => {
       dialog.close();
-      document.body.style.overflow = previousOverflow;
-      previous?.focus();
+      openDialogs -= 1;
+      if (openDialogs === 0) document.body.style.overflow = bodyOverflow;
+      // Wait until both the confirmation and its editor finish unmounting.
+      queueMicrotask(() => {
+        if (previous?.isConnected) previous.focus();
+      });
     };
   }, []);
   return (

@@ -71,6 +71,8 @@ export function Workspace() {
   const [filter, setFilter] = useState<Status | "all">("all");
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState<Modal>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [pendingModal, setPendingModal] = useState<{ next: Modal } | null>(null);
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(
     null,
   );
@@ -99,6 +101,13 @@ export function Workspace() {
     modal && "cardId" in modal
       ? project?.cards.find((c) => c.id === modal.cardId)
       : undefined;
+  function requestModal(next: Modal) {
+    if (hasUnsavedChanges) {
+      setPendingModal({ next });
+    } else {
+      setModal(next);
+    }
+  }
   function notify(text: string, error = false) {
     setToast({ text, error });
   }
@@ -705,18 +714,19 @@ export function Workspace() {
           notice={notification}
           title={modal.projectId ? "프로젝트 수정" : "새 프로젝트"}
           subtitle="아이디어를 시작할 작은 공간을 만들어요."
-          onClose={() => setModal(null)}
+          onClose={() => requestModal(null)}
         >
           <ProjectForm
             project={data.projects.find((p) => p.id === modal.projectId)}
             onSave={saveProject}
-            onClose={() => setModal(null)}
+            onClose={() => requestModal(null)}
+            onDirtyChange={setHasUnsavedChanges}
           />
           {modal.projectId && (
             <button
               className="button danger text-button"
               onClick={() =>
-                setModal({
+                requestModal({
                   kind: "delete-project",
                   projectId: modal.projectId!,
                 })
@@ -733,14 +743,15 @@ export function Workspace() {
           notice={notification}
           title={modal.cardId ? "작업 카드 수정" : "새 작업 카드"}
           subtitle={project.name}
-          onClose={() => setModal(null)}
+          onClose={() => requestModal(null)}
           wide
         >
           <CardForm
             key={modal.cardId ?? "new"}
             card={selectedCard}
             onSave={saveCard}
-            onClose={() => setModal(null)}
+            onClose={() => requestModal(null)}
+            onDirtyChange={setHasUnsavedChanges}
           />
         </Dialog>
       )}
@@ -748,20 +759,21 @@ export function Workspace() {
         <Dialog
           notice={notification}
           title={selectedCard.title}
-          onClose={() => setModal(null)}
+          onClose={() => requestModal(null)}
           wide
         >
           <CardDetail
             key={selectedCard.id}
             card={selectedCard}
-            onEdit={() => setModal({ kind: "card", cardId: selectedCard.id })}
+            onEdit={() => requestModal({ kind: "card", cardId: selectedCard.id })}
             onDelete={() =>
-              setModal({ kind: "delete-card", cardId: selectedCard.id })
+              requestModal({ kind: "delete-card", cardId: selectedCard.id })
             }
             onNoteSave={saveNote}
             onPrompt={() =>
-              setModal({ kind: "prompt", cardId: selectedCard.id })
+              requestModal({ kind: "prompt", cardId: selectedCard.id })
             }
+            onDirtyChange={setHasUnsavedChanges}
           />
         </Dialog>
       )}
@@ -770,19 +782,23 @@ export function Workspace() {
           notice={notification}
           title="AI 작업 요청문"
           subtitle="미리 확인하고 수정한 뒤 복사하세요."
-          onClose={() => setModal({ kind: "detail", cardId: selectedCard.id })}
+          onClose={() => requestModal({ kind: "detail", cardId: selectedCard.id })}
           wide
         >
           <button
             className="text-button button small"
             onClick={() =>
-              setModal({ kind: "detail", cardId: selectedCard.id })
+              requestModal({ kind: "detail", cardId: selectedCard.id })
             }
           >
             <ArrowLeft size={16} />
             카드로 돌아가기
           </button>
-          <PromptEditor project={project} card={selectedCard} />
+          <PromptEditor
+            project={project}
+            card={selectedCard}
+            onDirtyChange={setHasUnsavedChanges}
+          />
         </Dialog>
       )}
       {modal?.kind === "delete-project" && (
@@ -932,6 +948,37 @@ export function Workspace() {
               }}
             >
               데이터 교체
+            </button>
+          </div>
+        </Dialog>
+      )}
+      {pendingModal && (
+        <Dialog
+          title="작성 중인 내용을 버릴까요?"
+          onClose={() => setPendingModal(null)}
+        >
+          <p className="confirm-copy">
+            {modal?.kind === "prompt"
+              ? "아직 복사하지 않은 요청문 수정 내용이 있어요. 이동하면 수정 내용이 사라져요."
+              : "저장하지 않은 변경 내용이 있어요. 이동하면 작성 중인 내용이 사라져요."}
+          </p>
+          <div className="form-actions">
+            <button
+              className="button secondary"
+              data-dialog-autofocus
+              onClick={() => setPendingModal(null)}
+            >
+              계속 작성
+            </button>
+            <button
+              className="button danger filled"
+              onClick={() => {
+                setHasUnsavedChanges(false);
+                setModal(pendingModal.next);
+                setPendingModal(null);
+              }}
+            >
+              버리고 이동
             </button>
           </div>
         </Dialog>
