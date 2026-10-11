@@ -175,3 +175,156 @@ test("새로고침 확인을 취소하면 입력을 유지하고 저장 후에�
   await page.locator(".task-card").click();
   await expect(page.getByLabel("한 일", { exact: true })).toHaveValue("새로고침에서 유지");
 });
+
+test("저장 전 종료된 진행 메모를 복구하고 저장·버리기 때 임시 메모를 정리한다", async ({
+  page,
+  context,
+}) => {
+  await seedProject(page);
+  await page.locator(".task-card").click();
+  await page.getByLabel("한 일", { exact: true }).fill("강제 종료 전 구현 내용");
+  await page.getByLabel("막힌 점", { exact: true }).fill("테스트 환경 확인 필요");
+  await page.getByLabel("다음 할 일", { exact: true }).fill("모바일에서 검증");
+  await expect(page.getByText(/이 기기에 임시 저장됨/)).toBeVisible();
+  const storedBeforeSave = await page.evaluate(() =>
+    localStorage.getItem("with-ai:data:v1"),
+  );
+  expect(storedBeforeSave).not.toContain("강제 종료 전 구현 내용");
+
+  await page.close({ runBeforeUnload: false });
+  let recovered = await context.newPage();
+  await recovered.goto("/");
+  await expect(recovered.locator(".task-card")).toContainText("임시 메모 있음");
+  await recovered.locator(".task-card").click();
+  await expect(recovered.getByText(/임시 메모를 복구했어요/)).toBeVisible();
+  await expect(recovered.getByLabel("한 일", { exact: true })).toHaveValue(
+    "강제 종료 전 구현 내용",
+  );
+  await expect(recovered.getByLabel("막힌 점", { exact: true })).toHaveValue(
+    "테스트 환경 확인 필요",
+  );
+  await expect(recovered.getByLabel("다음 할 일", { exact: true })).toHaveValue(
+    "모바일에서 검증",
+  );
+  for (const width of [320, 390, 1440]) {
+    await recovered.setViewportSize({ width, height: 844 });
+    expect(
+      await recovered
+        .getByRole("dialog")
+        .evaluate((element) => element.scrollWidth <= element.clientWidth),
+    ).toBe(true);
+    expect(
+      await recovered.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+  await recovered.setViewportSize({ width: 390, height: 844 });
+
+  await recovered.getByRole("button", { name: "닫기", exact: true }).click();
+  const confirm = recovered.getByRole("dialog", {
+    name: "작성 중인 내용을 버릴까요?",
+  });
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole("button", { name: "계속 작성" }).click();
+  await expect(recovered.getByLabel("한 일", { exact: true })).toHaveValue(
+    "강제 종료 전 구현 내용",
+  );
+  await recovered.getByRole("button", { name: "메모 저장", exact: true }).click();
+  await expect(recovered.getByText(/메모 수정/)).toBeVisible();
+  expect(
+    await recovered.evaluate(() =>
+      Array.from({ length: localStorage.length }, (_, index) =>
+        localStorage.key(index),
+      ).some((key) => key?.startsWith("with-ai:note-draft:v1:")),
+    ),
+  ).toBe(false);
+  await recovered
+    .getByLabel("다음 할 일", { exact: true })
+    .fill("저장 직후 계속 작성한 내용");
+  await expect(recovered.getByText(/이 기기에 임시 저장됨/)).toBeVisible();
+  const draftBase = await recovered.evaluate(() => {
+    const data = JSON.parse(localStorage.getItem("with-ai:data:v1")!);
+    const draftKey = Array.from(
+      { length: localStorage.length },
+      (_, index) => localStorage.key(index),
+    ).find((key) => key?.startsWith("with-ai:note-draft:v1:"));
+    const draft = JSON.parse(localStorage.getItem(draftKey!)!);
+    return {
+      draft: draft.baseUpdatedAt,
+      saved: data.projects[0].cards[0].note.updatedAt,
+    };
+  });
+  expect(draftBase.draft).toBe(draftBase.saved);
+  await recovered.close({ runBeforeUnload: false });
+  recovered = await context.newPage();
+  await recovered.goto("/");
+  await expect(recovered.locator(".task-card")).toContainText("임시 메모 있음");
+  await recovered.locator(".task-card").click();
+  await expect(recovered.getByText(/임시 메모를 복구했어요/)).toBeVisible();
+  await expect(recovered.getByLabel("다음 할 일", { exact: true })).toHaveValue(
+    "저장 직후 계속 작성한 내용",
+  );
+  await recovered.getByRole("button", { name: "메모 저장", exact: true }).click();
+  await recovered.getByRole("button", { name: "닫기", exact: true }).click();
+  await expect(recovered.locator(".task-card")).toContainText("진행 메모 있음");
+
+  await recovered.locator(".task-card").click();
+  await recovered.getByLabel("다음 할 일", { exact: true }).fill("버릴 임시 내용");
+  await recovered.getByRole("button", { name: "닫기", exact: true }).click();
+  await recovered
+    .getByRole("dialog", { name: "작성 중인 내용을 버릴까요?" })
+    .getByRole("button", { name: "버리고 이동" })
+    .click();
+  await expect(recovered.locator(".task-card")).toContainText("진행 메모 있음");
+  await recovered.locator(".task-card").click();
+  await expect(recovered.getByLabel("다음 할 일", { exact: true })).toHaveValue(
+    "저장 직후 계속 작성한 내용",
+  );
+});
+
+test("진행 메모 임시 저장 실패를 알리고 입력과 영구 저장 경로를 유지한다", async ({
+  page,
+}) => {
+  await seedProject(page);
+  await page.locator(".task-card").click();
+  await page.evaluate(() => {
+    const original = Storage.prototype.setItem;
+    (
+      window as typeof window & { restoreDraftSetItem?: () => void }
+    ).restoreDraftSetItem = () => {
+      Storage.prototype.setItem = original;
+    };
+    Storage.prototype.setItem = function (key, value) {
+      if (key.startsWith("with-ai:note-draft:v1:")) {
+        throw new DOMException("full", "QuotaExceededError");
+      }
+      return original.call(this, key, value);
+    };
+  });
+  await page.getByLabel("한 일", { exact: true }).fill("실패해도 유지할 메모");
+  await expect(page.locator(".field-error")).toContainText(
+    "진행 메모를 임시 저장하지 못했어요",
+  );
+  await expect(page.getByLabel("한 일", { exact: true })).toHaveValue(
+    "실패해도 유지할 메모",
+  );
+  await expect(page.locator(".task-card")).not.toContainText("임시 메모 있음");
+  await page.evaluate(() => {
+    (
+      window as typeof window & { restoreDraftSetItem?: () => void }
+    ).restoreDraftSetItem?.();
+  });
+  await page
+    .getByLabel("한 일", { exact: true })
+    .fill("실패 후 다시 임시 저장한 메모");
+  await expect(page.getByText(/이 기기에 임시 저장됨/)).toBeVisible();
+  await page.getByRole("button", { name: "메모 저장", exact: true }).click();
+  await expect(page.getByText(/메모 수정/)).toBeVisible();
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  await page.reload();
+  await page.locator(".task-card").click();
+  await expect(page.getByLabel("한 일", { exact: true })).toHaveValue(
+    "실패 후 다시 임시 저장한 메모",
+  );
+});

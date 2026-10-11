@@ -1,7 +1,20 @@
 "use client";
-import { useState, type FormEvent, type ReactNode } from "react";
+import {
+  useCallback,
+  useState,
+  type FormEvent,
+  type ReactNode,
+} from "react";
 import { Check, Copy, FileText, Pencil, Sparkles, Trash2 } from "lucide-react";
-import { useUnsavedChanges } from "./use-unsaved-changes";
+import {
+  loadProgressNoteDraft,
+  removeProgressNoteDraft,
+  saveProgressNoteDraft,
+} from "@/lib/drafts";
+import {
+  useUnsavedChanges,
+  type UnsavedChangeHandler,
+} from "./use-unsaved-changes";
 import {
   Card,
   Project,
@@ -92,7 +105,7 @@ export function ProjectForm({
   project?: Project;
   onSave: (name: string, description: string) => boolean;
   onClose: () => void;
-  onDirtyChange: (dirty: boolean) => void;
+  onDirtyChange: UnsavedChangeHandler;
 }) {
   const [initial] = useState(() => ({
     name: project?.name ?? "",
@@ -156,7 +169,7 @@ export function CardForm({
   card?: Card;
   onSave: (fields: CardFields) => boolean;
   onClose: () => void;
-  onDirtyChange: (dirty: boolean) => void;
+  onDirtyChange: UnsavedChangeHandler;
 }) {
   const [initial] = useState<CardFields>(() => ({
     title: card?.title ?? "",
@@ -265,26 +278,85 @@ export function CardDetail({
   onNoteSave,
   onPrompt,
   onDirtyChange,
+  onDraftChange,
 }: {
   card: Card;
   onEdit: () => void;
   onDelete: () => void;
   onNoteSave: (
     note: Pick<Card["note"], "done" | "blocked" | "next">,
-  ) => boolean;
+  ) => string | false;
   onPrompt: () => void;
-  onDirtyChange: (dirty: boolean) => void;
+  onDirtyChange: UnsavedChangeHandler;
+  onDraftChange: () => void;
 }) {
-  const [note, setNote] = useState({
-    done: card.note.done,
-    blocked: card.note.blocked,
-    next: card.note.next,
-  });
+  const [baseUpdatedAt, setBaseUpdatedAt] = useState(card.note.updatedAt);
+  const [restoredDraft] = useState(() =>
+    loadProgressNoteDraft(card.id, card.note.updatedAt),
+  );
+  const [note, setNote] = useState(() =>
+    restoredDraft?.note ?? {
+      done: card.note.done,
+      blocked: card.note.blocked,
+      next: card.note.next,
+    },
+  );
+  const [draftStatus, setDraftStatus] = useState<
+    | { kind: "restored" | "saved"; savedAt: string }
+    | { kind: "error"; message: string }
+    | null
+  >(
+    restoredDraft
+      ? { kind: "restored", savedAt: restoredDraft.savedAt }
+      : null,
+  );
   const dirty =
     note.done !== card.note.done ||
     note.blocked !== card.note.blocked ||
     note.next !== card.note.next;
-  useUnsavedChanges(dirty, onDirtyChange);
+  const discardDraft = useCallback(() => {
+    if (removeProgressNoteDraft(card.id)) {
+      onDraftChange();
+      return true;
+    }
+    setDraftStatus({
+      kind: "error",
+      message:
+        "임시 메모를 지우지 못했어요. 브라우저 저장 권한을 확인한 뒤 다시 시도해 주세요.",
+    });
+    return false;
+  }, [card.id, onDraftChange]);
+  useUnsavedChanges(dirty, onDirtyChange, discardDraft);
+
+  function updateNote(key: keyof typeof note, value: string) {
+    const next = { ...note, [key]: value };
+    setNote(next);
+    const matchesSaved =
+      next.done === card.note.done &&
+      next.blocked === card.note.blocked &&
+      next.next === card.note.next;
+    if (matchesSaved) {
+      if (removeProgressNoteDraft(card.id)) {
+        onDraftChange();
+        setDraftStatus(null);
+      } else {
+        setDraftStatus({
+          kind: "error",
+          message:
+            "임시 메모를 지우지 못했어요. 브라우저 저장 권한을 확인한 뒤 다시 시도해 주세요.",
+        });
+      }
+      return;
+    }
+    const result = saveProgressNoteDraft(card.id, baseUpdatedAt, next);
+    if (result.ok && (!draftStatus || draftStatus.kind === "error"))
+      onDraftChange();
+    setDraftStatus(
+      result.ok
+        ? { kind: "saved", savedAt: result.savedAt }
+        : { kind: "error", message: result.message },
+    );
+  }
   return (
     <>
       <div className="detail-toolbar">
@@ -321,37 +393,53 @@ export function CardDetail({
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          onNoteSave(note);
+          const savedAt = onNoteSave(note);
+          if (savedAt) {
+            setBaseUpdatedAt(savedAt);
+            removeProgressNoteDraft(card.id);
+            onDraftChange();
+            setDraftStatus(null);
+          }
         }}
       >
         <Field
           label="한 일"
           name="note-done"
           value={note.done}
-          onChange={(v) => setNote({ ...note, done: v })}
+          onChange={(v) => updateNote("done", v)}
           multiline
         />
         <Field
           label="막힌 점"
           name="note-blocked"
           value={note.blocked}
-          onChange={(v) => setNote({ ...note, blocked: v })}
+          onChange={(v) => updateNote("blocked", v)}
           multiline
         />
         <Field
           label="다음 할 일"
           name="note-next"
           value={note.next}
-          onChange={(v) => setNote({ ...note, next: v })}
+          onChange={(v) => updateNote("next", v)}
           multiline
         />
         <div className="note-save">
-          <p className="muted">
-            {dirty
-              ? "저장하지 않은 변경 내용이 있어요."
-              : card.note.updatedAt
-                ? `메모 수정 ${formatDate(card.note.updatedAt)}`
-                : "아직 저장한 메모가 없어요."}
+          <p
+            className={draftStatus?.kind === "error" ? "field-error" : "muted"}
+            role={draftStatus?.kind === "error" ? "alert" : "status"}
+            aria-live="polite"
+          >
+            {draftStatus?.kind === "error"
+              ? draftStatus.message
+              : draftStatus?.kind === "restored"
+                ? `임시 메모를 복구했어요 · ${formatDate(draftStatus.savedAt)} 임시 저장`
+                : draftStatus?.kind === "saved"
+                  ? `${formatDate(draftStatus.savedAt)} 이 기기에 임시 저장됨`
+                  : dirty
+                    ? "저장하지 않은 변경 내용이 있어요."
+                    : card.note.updatedAt
+                      ? `메모 수정 ${formatDate(card.note.updatedAt)}`
+                      : "아직 저장한 메모가 없어요."}
           </p>
           <button className="button secondary" type="submit">
             메모 저장
@@ -385,7 +473,7 @@ export function PromptEditor({
 }: {
   project: Project;
   card: Card;
-  onDirtyChange: (dirty: boolean) => void;
+  onDirtyChange: UnsavedChangeHandler;
 }) {
   const [initial] = useState(() => generatePrompt(project, card));
   const [prompt, setPrompt] = useState(initial);

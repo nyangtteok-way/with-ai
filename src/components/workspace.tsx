@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowDownToLine,
@@ -35,6 +35,12 @@ import {
   summarize,
 } from "@/lib/model";
 import { retryLoad, saveData, useAppStore } from "@/lib/store";
+import {
+  hasProgressNoteDraft,
+  removeAllProgressNoteDrafts,
+  removeProgressNoteDraft,
+  removeProjectProgressNoteDrafts,
+} from "@/lib/drafts";
 import {
   Badge,
   CardDetail,
@@ -72,6 +78,8 @@ export function Workspace() {
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState<Modal>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const discardUnsavedRef = useRef<(() => boolean) | null>(null);
+  const [draftRevision, setDraftRevision] = useState(0);
   const [pendingModal, setPendingModal] = useState<{ next: Modal } | null>(null);
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(
     null,
@@ -80,6 +88,18 @@ export function Workspace() {
   const searchRef = useRef<HTMLInputElement>(null);
   const project =
     data.projects.find((p) => p.id === activeId) ?? data.projects[0];
+  const draftCardIds = useMemo(
+    () => {
+      // Re-read browser drafts after the detail editor saves or removes one.
+      void draftRevision;
+      return new Set(
+        (project?.cards ?? [])
+          .filter((card) => hasProgressNoteDraft(card))
+          .map((card) => card.id),
+      );
+    },
+    [project, draftRevision],
+  );
   const summary = summarize(project?.cards ?? []);
   const searchTerm = search.trim().toLowerCase();
   const cards =
@@ -101,6 +121,17 @@ export function Workspace() {
     modal && "cardId" in modal
       ? project?.cards.find((c) => c.id === modal.cardId)
       : undefined;
+  const onUnsavedChange = useCallback(
+    (dirty: boolean, onDiscard?: () => boolean) => {
+      discardUnsavedRef.current = dirty ? (onDiscard ?? null) : null;
+      setHasUnsavedChanges(dirty);
+    },
+    [],
+  );
+  const onDraftChange = useCallback(
+    () => setDraftRevision((revision) => revision + 1),
+    [],
+  );
   function requestModal(next: Modal) {
     if (hasUnsavedChanges) {
       setPendingModal({ next });
@@ -222,7 +253,9 @@ export function Workspace() {
         ),
       },
       "진행 메모를 저장했어요.",
-    );
+    )
+      ? stamp
+      : false;
   }
   function removeProject(id: string) {
     if (
@@ -231,6 +264,8 @@ export function Workspace() {
         "프로젝트와 작업 카드를 삭제했어요.",
       )
     ) {
+      const removed = data.projects.find((p) => p.id === id);
+      if (removed) removeProjectProgressNoteDrafts(removed);
       setModal(null);
       setFilter("all");
       setSearch("");
@@ -247,8 +282,10 @@ export function Workspace() {
         },
         "작업 카드를 삭제했어요.",
       )
-    )
+    ) {
+      removeProgressNoteDraft(id);
       setModal(null);
+    }
   }
   async function importFile(file?: File) {
     if (!file) return;
@@ -578,7 +615,9 @@ export function Workspace() {
                         <div className="card-bottom">
                           <span>{formatDate(card.updatedAt)} 수정</span>
                           <span>
-                            {card.note.updatedAt
+                            {draftCardIds.has(card.id)
+                              ? "임시 메모 있음"
+                              : card.note.updatedAt
                               ? "진행 메모 있음"
                               : "메모 작성 전"}
                           </span>
@@ -720,7 +759,7 @@ export function Workspace() {
             project={data.projects.find((p) => p.id === modal.projectId)}
             onSave={saveProject}
             onClose={() => requestModal(null)}
-            onDirtyChange={setHasUnsavedChanges}
+            onDirtyChange={onUnsavedChange}
           />
           {modal.projectId && (
             <button
@@ -751,7 +790,7 @@ export function Workspace() {
             card={selectedCard}
             onSave={saveCard}
             onClose={() => requestModal(null)}
-            onDirtyChange={setHasUnsavedChanges}
+            onDirtyChange={onUnsavedChange}
           />
         </Dialog>
       )}
@@ -773,7 +812,8 @@ export function Workspace() {
             onPrompt={() =>
               requestModal({ kind: "prompt", cardId: selectedCard.id })
             }
-            onDirtyChange={setHasUnsavedChanges}
+            onDirtyChange={onUnsavedChange}
+            onDraftChange={onDraftChange}
           />
         </Dialog>
       )}
@@ -797,7 +837,7 @@ export function Workspace() {
           <PromptEditor
             project={project}
             card={selectedCard}
-            onDirtyChange={setHasUnsavedChanges}
+            onDirtyChange={onUnsavedChange}
           />
         </Dialog>
       )}
@@ -940,6 +980,7 @@ export function Workspace() {
               className="button primary"
               onClick={() => {
                 if (persist(modal.data, "백업 데이터를 가져왔어요.", true)) {
+                  removeAllProgressNoteDrafts();
                   setActiveId(null);
                   setFilter("all");
                   setSearch("");
@@ -973,6 +1014,11 @@ export function Workspace() {
             <button
               className="button danger filled"
               onClick={() => {
+                if (discardUnsavedRef.current?.() === false) {
+                  setPendingModal(null);
+                  return;
+                }
+                discardUnsavedRef.current = null;
                 setHasUnsavedChanges(false);
                 setModal(pendingModal.next);
                 setPendingModal(null);

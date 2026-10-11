@@ -1,14 +1,20 @@
 "use client";
 import { useEffect } from "react";
 
+export type UnsavedChangeHandler = (
+  dirty: boolean,
+  onDiscard?: () => boolean,
+) => void;
+
 export function useUnsavedChanges(
   dirty: boolean,
-  onDirtyChange: (dirty: boolean) => void,
+  onDirtyChange: UnsavedChangeHandler,
+  onDiscard?: () => boolean,
 ) {
   useEffect(() => {
-    onDirtyChange(dirty);
+    onDirtyChange(dirty, dirty ? onDiscard : undefined);
     return () => onDirtyChange(false);
-  }, [dirty, onDirtyChange]);
+  }, [dirty, onDirtyChange, onDiscard]);
 
   useEffect(() => {
     if (!dirty) return;
