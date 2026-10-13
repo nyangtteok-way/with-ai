@@ -328,3 +328,170 @@ test("진행 메모 임시 저장 실패를 알리고 입력과 영구 저장 �
     "실패 후 다시 임시 저장한 메모",
   );
 });
+
+test("저장 전 종료된 새 카드와 수정 카드를 복구하고 영구 저장 뒤 초안을 정리한다", async ({
+  page,
+  context,
+}) => {
+  await seedProject(page);
+  await page.getByRole("button", { name: "작업 카드 추가", exact: true }).click();
+  await page.getByLabel("작업 제목").fill("강제 종료 전 새 카드");
+  await page.getByLabel("작업 상태", { exact: true }).selectOption("doing");
+  await page.getByLabel("작업 설명", { exact: true }).fill("복구할 카드 설명");
+  await page.getByLabel("요구사항", { exact: true }).fill("모바일에서도 이어 쓰기");
+  await page.getByLabel("완료 조건", { exact: true }).fill("모든 필드가 복구됨");
+  await expect(page.getByText(/이 기기에 카드 초안 저장됨/)).toBeVisible();
+  expect(
+    await page.evaluate(() => localStorage.getItem("with-ai:data:v1")),
+  ).not.toContain("강제 종료 전 새 카드");
+
+  await page.close({ runBeforeUnload: false });
+  let recovered = await context.newPage();
+  await recovered.goto("/");
+  await expect(
+    recovered.getByRole("button", {
+      name: "작성 중 카드 계속",
+      exact: true,
+    }),
+  ).toBeVisible();
+  await recovered
+    .getByRole("button", { name: "작성 중 카드 계속", exact: true })
+    .click();
+  await expect(recovered.getByText(/임시 저장한 카드 내용을 복구했어요/)).toBeVisible();
+  await expect(recovered.getByLabel("작업 제목")).toHaveValue(
+    "강제 종료 전 새 카드",
+  );
+  await expect(recovered.getByLabel("작업 상태", { exact: true })).toHaveValue(
+    "doing",
+  );
+  await expect(recovered.getByLabel("작업 설명", { exact: true })).toHaveValue(
+    "복구할 카드 설명",
+  );
+  await expect(recovered.getByLabel("요구사항", { exact: true })).toHaveValue(
+    "모바일에서도 이어 쓰기",
+  );
+  await expect(recovered.getByLabel("완료 조건", { exact: true })).toHaveValue(
+    "모든 필드가 복구됨",
+  );
+  for (const width of [320, 390, 1440]) {
+    await recovered.setViewportSize({ width, height: 844 });
+    expect(
+      await recovered
+        .getByRole("dialog")
+        .evaluate((element) => element.scrollWidth <= element.clientWidth),
+    ).toBe(true);
+    expect(
+      await recovered.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+  await recovered.setViewportSize({ width: 390, height: 844 });
+  await recovered.getByRole("button", { name: "닫기", exact: true }).click();
+  const confirm = recovered.getByRole("dialog", {
+    name: "작성 중인 내용을 버릴까요?",
+  });
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole("button", { name: "계속 작성" }).click();
+  await expect(recovered.getByLabel("작업 제목")).toHaveValue(
+    "강제 종료 전 새 카드",
+  );
+  await recovered
+    .getByRole("button", { name: "카드 만들기", exact: true })
+    .click();
+  expect(
+    await recovered.evaluate(() =>
+      Array.from({ length: localStorage.length }, (_, index) =>
+        localStorage.key(index),
+      ).some((key) => key?.startsWith("with-ai:card-draft:v1:")),
+    ),
+  ).toBe(false);
+
+  const savedCard = recovered
+    .locator(".task-card")
+    .filter({ hasText: "강제 종료 전 새 카드" });
+  await savedCard.click();
+  await recovered.getByRole("button", { name: "카드 수정", exact: true }).click();
+  await recovered.getByLabel("작업 제목").fill("수정 중인 카드 제목");
+  await recovered
+    .getByLabel("완료 조건", { exact: true })
+    .fill("수정 초안도 복구됨");
+  await expect(recovered.getByText(/이 기기에 카드 초안 저장됨/)).toBeVisible();
+  await recovered.close({ runBeforeUnload: false });
+
+  recovered = await context.newPage();
+  await recovered.goto("/");
+  const cardWithDraft = recovered
+    .locator(".task-card")
+    .filter({ hasText: "강제 종료 전 새 카드" });
+  await expect(cardWithDraft).toContainText("카드 수정 초안 있음");
+  await cardWithDraft.click();
+  await recovered.getByRole("button", { name: "카드 수정", exact: true }).click();
+  await expect(recovered.getByText(/임시 저장한 카드 내용을 복구했어요/)).toBeVisible();
+  await expect(recovered.getByLabel("작업 제목")).toHaveValue(
+    "수정 중인 카드 제목",
+  );
+  await expect(recovered.getByLabel("완료 조건", { exact: true })).toHaveValue(
+    "수정 초안도 복구됨",
+  );
+  await recovered
+    .getByRole("button", { name: "변경 저장", exact: true })
+    .click();
+  await expect(
+    recovered.getByRole("dialog", { name: "수정 중인 카드 제목" }),
+  ).toBeVisible();
+  expect(
+    await recovered.evaluate(() =>
+      Array.from({ length: localStorage.length }, (_, index) =>
+        localStorage.key(index),
+      ).some((key) => key?.startsWith("with-ai:card-draft:v1:")),
+    ),
+  ).toBe(false);
+  await recovered.getByRole("button", { name: "닫기", exact: true }).click();
+  await expect(
+    recovered.locator(".task-card").filter({ hasText: "수정 중인 카드 제목" }),
+  ).not.toContainText("초안 있음");
+});
+
+test("작업 카드 초안 저장 실패를 알리고 입력과 영구 저장 경로를 유지한다", async ({
+  page,
+}) => {
+  await seedProject(page);
+  await page.getByRole("button", { name: "작업 카드 추가", exact: true }).click();
+  await page.evaluate(() => {
+    const original = Storage.prototype.setItem;
+    (
+      window as typeof window & { restoreCardDraftSetItem?: () => void }
+    ).restoreCardDraftSetItem = () => {
+      Storage.prototype.setItem = original;
+    };
+    Storage.prototype.setItem = function (key, value) {
+      if (key.startsWith("with-ai:card-draft:v1:")) {
+        throw new DOMException("full", "QuotaExceededError");
+      }
+      return original.call(this, key, value);
+    };
+  });
+  await page.getByLabel("작업 제목").fill("실패해도 유지할 카드");
+  await expect(page.locator(".field-error")).toContainText(
+    "작업 카드 초안을 임시 저장하지 못했어요",
+  );
+  await expect(page.getByLabel("작업 제목")).toHaveValue(
+    "실패해도 유지할 카드",
+  );
+  await page.evaluate(() => {
+    (
+      window as typeof window & { restoreCardDraftSetItem?: () => void }
+    ).restoreCardDraftSetItem?.();
+  });
+  await page.getByLabel("작업 제목").fill("실패 후 저장할 카드");
+  await expect(page.getByText(/이 기기에 카드 초안 저장됨/)).toBeVisible();
+  await page.getByRole("button", { name: "카드 만들기", exact: true }).click();
+  await expect(
+    page.locator(".task-card").filter({ hasText: "실패 후 저장할 카드" }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.locator(".task-card").filter({ hasText: "실패 후 저장할 카드" }),
+  ).toBeVisible();
+});

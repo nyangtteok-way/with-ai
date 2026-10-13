@@ -36,9 +36,13 @@ import {
 } from "@/lib/model";
 import { retryLoad, saveData, useAppStore } from "@/lib/store";
 import {
+  hasCardFormDraft,
   hasProgressNoteDraft,
+  removeAllCardFormDrafts,
   removeAllProgressNoteDrafts,
+  removeCardFormDraft,
   removeProgressNoteDraft,
+  removeProjectCardFormDrafts,
   removeProjectProgressNoteDrafts,
 } from "@/lib/drafts";
 import {
@@ -88,15 +92,26 @@ export function Workspace() {
   const searchRef = useRef<HTMLInputElement>(null);
   const project =
     data.projects.find((p) => p.id === activeId) ?? data.projects[0];
-  const draftCardIds = useMemo(
+  const draftIndicators = useMemo(
     () => {
-      // Re-read browser drafts after the detail editor saves or removes one.
+      // Re-read browser drafts after an editor saves or removes one.
       void draftRevision;
-      return new Set(
-        (project?.cards ?? [])
-          .filter((card) => hasProgressNoteDraft(card))
-          .map((card) => card.id),
-      );
+      const projectCards = project?.cards ?? [];
+      return {
+        noteCardIds: new Set(
+          projectCards
+            .filter((card) => hasProgressNoteDraft(card))
+            .map((card) => card.id),
+        ),
+        cardFormIds: new Set(
+          project
+            ? projectCards
+                .filter((card) => hasCardFormDraft(project.id, card))
+                .map((card) => card.id)
+            : [],
+        ),
+        hasNewCard: project ? hasCardFormDraft(project.id) : false,
+      };
     },
     [project, draftRevision],
   );
@@ -132,6 +147,14 @@ export function Workspace() {
     () => setDraftRevision((revision) => revision + 1),
     [],
   );
+  function cardNoteLabel(card: Card) {
+    const hasCardDraft = draftIndicators.cardFormIds.has(card.id);
+    const hasNoteDraft = draftIndicators.noteCardIds.has(card.id);
+    if (hasCardDraft && hasNoteDraft) return "카드·메모 초안 있음";
+    if (hasCardDraft) return "카드 수정 초안 있음";
+    if (hasNoteDraft) return "임시 메모 있음";
+    return card.note.updatedAt ? "진행 메모 있음" : "메모 작성 전";
+  }
   function requestModal(next: Modal) {
     if (hasUnsavedChanges) {
       setPendingModal({ next });
@@ -265,7 +288,10 @@ export function Workspace() {
       )
     ) {
       const removed = data.projects.find((p) => p.id === id);
-      if (removed) removeProjectProgressNoteDrafts(removed);
+      if (removed) {
+        removeProjectProgressNoteDrafts(removed);
+        removeProjectCardFormDrafts(removed.id);
+      }
       setModal(null);
       setFilter("all");
       setSearch("");
@@ -284,6 +310,7 @@ export function Workspace() {
       )
     ) {
       removeProgressNoteDraft(id);
+      removeCardFormDraft(project.id, id);
       setModal(null);
     }
   }
@@ -534,7 +561,10 @@ export function Workspace() {
                     disabled={!!error}
                     onClick={() => setModal({ kind: "card" })}
                   >
-                    <Plus size={18} />새 작업 카드
+                    <Plus size={18} />
+                    {draftIndicators.hasNewCard
+                      ? "작성 중 카드 계속"
+                      : "새 작업 카드"}
                   </button>
                 </div>
                 <div className="card-search">
@@ -614,13 +644,7 @@ export function Workspace() {
                         </p>
                         <div className="card-bottom">
                           <span>{formatDate(card.updatedAt)} 수정</span>
-                          <span>
-                            {draftCardIds.has(card.id)
-                              ? "임시 메모 있음"
-                              : card.note.updatedAt
-                              ? "진행 메모 있음"
-                              : "메모 작성 전"}
-                          </span>
+                          <span>{cardNoteLabel(card)}</span>
                         </div>
                       </button>
                     ))}
@@ -660,7 +684,9 @@ export function Workspace() {
                         ? "검색·필터 초기화"
                         : project.cards.length
                           ? "전체 작업 보기"
-                          : "첫 작업 카드 만들기"}
+                          : draftIndicators.hasNewCard
+                            ? "작성 중 카드 계속"
+                            : "첫 작업 카드 만들기"}
                       <Plus size={17} />
                     </button>
                   </div>
@@ -719,7 +745,13 @@ export function Workspace() {
           }
         >
           <Plus size={21} />
-          <span>{project ? "작업 카드 추가" : "프로젝트 만들기"}</span>
+          <span>
+            {project
+              ? draftIndicators.hasNewCard
+                ? "작성 중 카드 계속"
+                : "작업 카드 추가"
+              : "프로젝트 만들기"}
+          </span>
         </button>
         <button onClick={() => setModal({ kind: "settings" })}>
           <Settings2 size={20} />
@@ -786,11 +818,13 @@ export function Workspace() {
           wide
         >
           <CardForm
-            key={modal.cardId ?? "new"}
+            key={`${project.id}:${modal.cardId ?? "new"}`}
+            projectId={project.id}
             card={selectedCard}
             onSave={saveCard}
             onClose={() => requestModal(null)}
             onDirtyChange={onUnsavedChange}
+            onDraftChange={onDraftChange}
           />
         </Dialog>
       )}
@@ -981,6 +1015,7 @@ export function Workspace() {
               onClick={() => {
                 if (persist(modal.data, "백업 데이터를 가져왔어요.", true)) {
                   removeAllProgressNoteDrafts();
+                  removeAllCardFormDrafts();
                   setActiveId(null);
                   setFilter("all");
                   setSearch("");

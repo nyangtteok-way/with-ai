@@ -932,6 +932,9 @@ input[aria-invalid="true"] {
 .field-error {
   color: #b43541;
 }
+.form-draft-status {
+  margin: -7px 0 8px;
+}
 .form-actions {
   display: flex;
   justify-content: flex-end;

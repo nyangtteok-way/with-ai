@@ -1,8 +1,13 @@
-import type { Card, ProgressNote, Project } from "./model";
+import { STATUSES, type Card, type ProgressNote, type Project } from "./model";
 
 export const PROGRESS_NOTE_DRAFT_PREFIX = "with-ai:note-draft:v1:";
+export const CARD_FORM_DRAFT_PREFIX = "with-ai:card-draft:v1:";
 
 type NoteFields = Pick<ProgressNote, "done" | "blocked" | "next">;
+export type CardDraftFields = Pick<
+  Card,
+  "title" | "description" | "requirements" | "acceptance" | "status"
+>;
 type StorageLike = Pick<
   Storage,
   "getItem" | "setItem" | "removeItem" | "key" | "length"
@@ -16,10 +21,21 @@ interface StoredProgressNoteDraft {
   savedAt: string;
 }
 
+interface StoredCardFormDraft {
+  version: 1;
+  projectId: string;
+  cardId: string | null;
+  base: CardDraftFields | null;
+  fields: CardDraftFields;
+  savedAt: string;
+}
+
 export type ProgressNoteDraft = Pick<
   StoredProgressNoteDraft,
   "note" | "savedAt"
 >;
+
+export type CardFormDraft = Pick<StoredCardFormDraft, "fields" | "savedAt">;
 
 type DraftResult =
   | { ok: true; savedAt: string }
@@ -29,8 +45,18 @@ function getStorage(storage?: StorageLike): StorageLike {
   return storage ?? globalThis.localStorage;
 }
 
-function key(cardId: string) {
+function noteKey(cardId: string) {
   return `${PROGRESS_NOTE_DRAFT_PREFIX}${cardId}`;
+}
+
+function cardKey(projectId: string, cardId: string | null) {
+  const projectPart = encodeURIComponent(projectId);
+  const cardPart = cardId === null ? "new" : `edit:${encodeURIComponent(cardId)}`;
+  return `${CARD_FORM_DRAFT_PREFIX}${projectPart}:${cardPart}`;
+}
+
+function cardProjectPrefix(projectId: string) {
+  return `${CARD_FORM_DRAFT_PREFIX}${encodeURIComponent(projectId)}:`;
 }
 
 function isNote(value: unknown): value is NoteFields {
@@ -38,6 +64,33 @@ function isNote(value: unknown): value is NoteFields {
   const note = value as Record<string, unknown>;
   return [note.done, note.blocked, note.next].every(
     (field) => typeof field === "string" && field.length <= 10000,
+  );
+}
+
+function isCardFields(value: unknown): value is CardDraftFields {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const fields = value as Record<string, unknown>;
+  return (
+    typeof fields.title === "string" &&
+    fields.title.length <= 120 &&
+    [fields.description, fields.requirements, fields.acceptance].every(
+      (field) => typeof field === "string" && field.length <= 10000,
+    ) &&
+    STATUSES.some((status) => status.value === fields.status)
+  );
+}
+
+function sameCardFields(
+  first: CardDraftFields | null,
+  second: CardDraftFields | null,
+) {
+  if (first === null || second === null) return first === second;
+  return (
+    first.title === second.title &&
+    first.description === second.description &&
+    first.requirements === second.requirements &&
+    first.acceptance === second.acceptance &&
+    first.status === second.status
   );
 }
 
@@ -65,7 +118,7 @@ export function loadProgressNoteDraft(
 ): ProgressNoteDraft | null {
   try {
     const target = getStorage(storage);
-    const raw = target.getItem(key(cardId));
+    const raw = target.getItem(noteKey(cardId));
     if (raw === null) return null;
     const value: unknown = JSON.parse(raw);
     if (!isStoredDraft(value, cardId, baseUpdatedAt)) return null;
@@ -91,7 +144,7 @@ export function saveProgressNoteDraft(
       note,
       savedAt,
     };
-    getStorage(storage).setItem(key(cardId), JSON.stringify(draft));
+    getStorage(storage).setItem(noteKey(cardId), JSON.stringify(draft));
     return { ok: true, savedAt };
   } catch {
     return {
@@ -107,7 +160,7 @@ export function removeProgressNoteDraft(
   storage?: StorageLike,
 ) {
   try {
-    getStorage(storage).removeItem(key(cardId));
+    getStorage(storage).removeItem(noteKey(cardId));
     return true;
   } catch {
     return false;
@@ -129,15 +182,131 @@ export function removeProjectProgressNoteDrafts(
 }
 
 export function removeAllProgressNoteDrafts(storage?: StorageLike) {
+  removeDraftsWithPrefix(PROGRESS_NOTE_DRAFT_PREFIX, storage);
+}
+
+function isStoredCardFormDraft(
+  value: unknown,
+  projectId: string,
+  cardId: string | null,
+  base: CardDraftFields | null,
+): value is StoredCardFormDraft {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const draft = value as Record<string, unknown>;
+  const storedBase = draft.base === null ? null : draft.base;
+  return (
+    draft.version === 1 &&
+    draft.projectId === projectId &&
+    draft.cardId === cardId &&
+    (storedBase === null || isCardFields(storedBase)) &&
+    sameCardFields(storedBase as CardDraftFields | null, base) &&
+    isCardFields(draft.fields) &&
+    typeof draft.savedAt === "string" &&
+    Number.isFinite(Date.parse(draft.savedAt))
+  );
+}
+
+export function loadCardFormDraft(
+  projectId: string,
+  cardId: string | null,
+  base: CardDraftFields | null,
+  storage?: StorageLike,
+): CardFormDraft | null {
+  try {
+    const raw = getStorage(storage).getItem(cardKey(projectId, cardId));
+    if (raw === null) return null;
+    const value: unknown = JSON.parse(raw);
+    if (!isStoredCardFormDraft(value, projectId, cardId, base)) return null;
+    return { fields: value.fields, savedAt: value.savedAt };
+  } catch {
+    return null;
+  }
+}
+
+export function saveCardFormDraft(
+  projectId: string,
+  cardId: string | null,
+  base: CardDraftFields | null,
+  fields: CardDraftFields,
+  storage?: StorageLike,
+): DraftResult {
+  try {
+    if (!isCardFields(fields) || (base !== null && !isCardFields(base)))
+      throw new Error("invalid card draft");
+    const savedAt = new Date().toISOString();
+    const draft: StoredCardFormDraft = {
+      version: 1,
+      projectId,
+      cardId,
+      base,
+      fields,
+      savedAt,
+    };
+    getStorage(storage).setItem(cardKey(projectId, cardId), JSON.stringify(draft));
+    return { ok: true, savedAt };
+  } catch {
+    return {
+      ok: false,
+      message:
+        "작업 카드 초안을 임시 저장하지 못했어요. 브라우저 저장 공간이나 권한을 확인해 주세요.",
+    };
+  }
+}
+
+export function removeCardFormDraft(
+  projectId: string,
+  cardId: string | null,
+  storage?: StorageLike,
+) {
+  try {
+    getStorage(storage).removeItem(cardKey(projectId, cardId));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function hasCardFormDraft(
+  projectId: string,
+  card?: Pick<
+    Card,
+    "id" | "title" | "description" | "requirements" | "acceptance" | "status"
+  >,
+  storage?: StorageLike,
+) {
+  const base: CardDraftFields | null = card
+    ? {
+        title: card.title,
+        description: card.description,
+        requirements: card.requirements,
+        acceptance: card.acceptance,
+        status: card.status,
+      }
+    : null;
+  return !!loadCardFormDraft(projectId, card?.id ?? null, base, storage);
+}
+
+export function removeProjectCardFormDrafts(
+  projectId: string,
+  storage?: StorageLike,
+) {
+  removeDraftsWithPrefix(cardProjectPrefix(projectId), storage);
+}
+
+export function removeAllCardFormDrafts(storage?: StorageLike) {
+  removeDraftsWithPrefix(CARD_FORM_DRAFT_PREFIX, storage);
+}
+
+function removeDraftsWithPrefix(prefix: string, storage?: StorageLike) {
   try {
     const target = getStorage(storage);
     const keys: string[] = [];
     for (let index = 0; index < target.length; index += 1) {
       const storageKey = target.key(index);
-      if (storageKey?.startsWith(PROGRESS_NOTE_DRAFT_PREFIX)) keys.push(storageKey);
+      if (storageKey?.startsWith(prefix)) keys.push(storageKey);
     }
     keys.forEach((storageKey) => target.removeItem(storageKey));
   } catch {
-    // Draft cleanup must never block confirmed data replacement.
+    // Draft cleanup must never block confirmed data replacement or deletion.
   }
 }

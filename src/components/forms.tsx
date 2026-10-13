@@ -7,9 +7,13 @@ import {
 } from "react";
 import { Check, Copy, FileText, Pencil, Sparkles, Trash2 } from "lucide-react";
 import {
+  loadCardFormDraft,
   loadProgressNoteDraft,
+  removeCardFormDraft,
   removeProgressNoteDraft,
+  saveCardFormDraft,
   saveProgressNoteDraft,
+  type CardDraftFields,
 } from "@/lib/drafts";
 import {
   useUnsavedChanges,
@@ -156,39 +160,111 @@ export function ProjectForm({
     </form>
   );
 }
-export type CardFields = Pick<
-  Card,
-  "title" | "description" | "requirements" | "acceptance" | "status"
->;
+export type CardFields = CardDraftFields;
 export function CardForm({
+  projectId,
   card,
   onSave,
   onClose,
   onDirtyChange,
+  onDraftChange,
 }: {
+  projectId: string;
   card?: Card;
   onSave: (fields: CardFields) => boolean;
   onClose: () => void;
   onDirtyChange: UnsavedChangeHandler;
+  onDraftChange: () => void;
 }) {
-  const [initial] = useState<CardFields>(() => ({
-    title: card?.title ?? "",
-    description: card?.description ?? "",
-    requirements: card?.requirements ?? "",
-    acceptance: card?.acceptance ?? "",
-    status: card?.status ?? "todo",
-  }));
-  const [fields, setFields] = useState(initial);
-  const [error, setError] = useState("");
-  useUnsavedChanges(
-    (Object.keys(initial) as (keyof CardFields)[]).some(
-      (key) => fields[key] !== initial[key],
-    ),
-    onDirtyChange,
+  const [draftTarget] = useState(() => {
+    const base: CardFields | null = card
+      ? {
+          title: card.title,
+          description: card.description,
+          requirements: card.requirements,
+          acceptance: card.acceptance,
+          status: card.status,
+        }
+      : null;
+    return { cardId: card?.id ?? null, base };
+  });
+  const [initial] = useState<CardFields>(() =>
+    draftTarget.base ?? {
+      title: "",
+      description: "",
+      requirements: "",
+      acceptance: "",
+      status: "todo",
+    },
   );
+  const [restoredDraft] = useState(() =>
+    loadCardFormDraft(
+      projectId,
+      draftTarget.cardId,
+      draftTarget.base,
+    ),
+  );
+  const [fields, setFields] = useState(restoredDraft?.fields ?? initial);
+  const [error, setError] = useState("");
+  const [draftStatus, setDraftStatus] = useState<
+    | { kind: "restored" | "saved"; savedAt: string }
+    | { kind: "error"; message: string }
+    | null
+  >(
+    restoredDraft
+      ? { kind: "restored", savedAt: restoredDraft.savedAt }
+      : null,
+  );
+  const dirty = (Object.keys(initial) as (keyof CardFields)[]).some(
+    (key) => fields[key] !== initial[key],
+  );
+  const discardDraft = useCallback(() => {
+    if (removeCardFormDraft(projectId, draftTarget.cardId)) {
+      onDraftChange();
+      return true;
+    }
+    setDraftStatus({
+      kind: "error",
+      message:
+        "작업 카드 초안을 지우지 못했어요. 브라우저 저장 권한을 확인한 뒤 다시 시도해 주세요.",
+    });
+    return false;
+  }, [draftTarget.cardId, onDraftChange, projectId]);
+  useUnsavedChanges(dirty, onDirtyChange, discardDraft);
+
   function update(key: keyof CardFields, value: string) {
-    setFields((f) => ({ ...f, [key]: value }));
+    const next = { ...fields, [key]: value } as CardFields;
+    setFields(next);
     if (key === "title") setError("");
+    const matchesSaved = (Object.keys(initial) as (keyof CardFields)[]).every(
+      (field) => next[field] === initial[field],
+    );
+    if (matchesSaved) {
+      if (removeCardFormDraft(projectId, draftTarget.cardId)) {
+        onDraftChange();
+        setDraftStatus(null);
+      } else {
+        setDraftStatus({
+          kind: "error",
+          message:
+            "작업 카드 초안을 지우지 못했어요. 브라우저 저장 권한을 확인한 뒤 다시 시도해 주세요.",
+        });
+      }
+      return;
+    }
+    const result = saveCardFormDraft(
+      projectId,
+      draftTarget.cardId,
+      draftTarget.base,
+      next,
+    );
+    if (result.ok && (!draftStatus || draftStatus.kind === "error"))
+      onDraftChange();
+    setDraftStatus(
+      result.ok
+        ? { kind: "saved", savedAt: result.savedAt }
+        : { kind: "error", message: result.message },
+    );
   }
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -197,13 +273,18 @@ export function CardForm({
       document.getElementById("field-card-title")?.focus();
       return;
     }
-    onSave({
+    const saved = onSave({
       ...fields,
       title: fields.title.trim(),
       description: fields.description.trim(),
       requirements: fields.requirements.trim(),
       acceptance: fields.acceptance.trim(),
     });
+    if (saved) {
+      removeCardFormDraft(projectId, draftTarget.cardId);
+      onDraftChange();
+      setDraftStatus(null);
+    }
   }
   return (
     <form onSubmit={submit} noValidate>
@@ -257,6 +338,19 @@ export function CardForm({
         multiline
         hint="어떤 결과를 확인하면 완료인가요?"
       />
+      {draftStatus && (
+        <p
+          className={`form-draft-status ${draftStatus.kind === "error" ? "field-error" : "muted"}`}
+          role={draftStatus.kind === "error" ? "alert" : "status"}
+          aria-live="polite"
+        >
+          {draftStatus.kind === "error"
+            ? draftStatus.message
+            : draftStatus.kind === "restored"
+              ? `임시 저장한 카드 내용을 복구했어요 · ${formatDate(draftStatus.savedAt)} 임시 저장`
+              : `${formatDate(draftStatus.savedAt)} 이 기기에 카드 초안 저장됨`}
+        </p>
+      )}
       <FormActions onClose={onClose}>
         {card ? "변경 저장" : "카드 만들기"}
       </FormActions>
