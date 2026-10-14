@@ -8,12 +8,15 @@ import {
 import { Check, Copy, FileText, Pencil, Sparkles, Trash2 } from "lucide-react";
 import {
   loadCardFormDraft,
+  loadPromptDraft,
   loadProjectFormDraft,
   loadProgressNoteDraft,
   removeCardFormDraft,
+  removePromptDraft,
   removeProjectFormDraft,
   removeProgressNoteDraft,
   saveCardFormDraft,
+  savePromptDraft,
   saveProjectFormDraft,
   saveProgressNoteDraft,
   type CardDraftFields,
@@ -451,6 +454,7 @@ export function CardDetail({
   onDelete,
   onNoteSave,
   onPrompt,
+  hasPromptDraft,
   onDirtyChange,
   onDraftChange,
 }: {
@@ -461,6 +465,7 @@ export function CardDetail({
     note: Pick<Card["note"], "done" | "blocked" | "next">,
   ) => string | false;
   onPrompt: () => void;
+  hasPromptDraft: boolean;
   onDirtyChange: UnsavedChangeHandler;
   onDraftChange: () => void;
 }) {
@@ -627,7 +632,7 @@ export function CardDetail({
           <p>저장된 카드와 진행 메모로 요청문을 만들어요.</p>
         </div>
         <button className="button primary" onClick={onPrompt} disabled={dirty}>
-          AI 작업 요청문
+          {hasPromptDraft ? "작성 중 요청문 계속" : "AI 작업 요청문"}
         </button>
         {dirty && (
           <p className="field-hint">메모를 먼저 저장하면 요청문에 반영돼요.</p>
@@ -644,20 +649,84 @@ export function PromptEditor({
   project,
   card,
   onDirtyChange,
+  onDraftChange,
 }: {
   project: Project;
   card: Card;
   onDirtyChange: UnsavedChangeHandler;
+  onDraftChange: () => void;
 }) {
   const [initial] = useState(() => generatePrompt(project, card));
-  const [prompt, setPrompt] = useState(initial);
+  const [restoredDraft] = useState(() =>
+    loadPromptDraft(project.id, card.id, initial),
+  );
+  const [prompt, setPrompt] = useState(restoredDraft?.prompt ?? initial);
   const [copiedPrompt, setCopiedPrompt] = useState<string | null>(null);
   const [result, setResult] = useState<"success" | "failed" | null>(null);
-  useUnsavedChanges(prompt !== initial && prompt !== copiedPrompt, onDirtyChange);
+  const [draftStatus, setDraftStatus] = useState<
+    | { kind: "restored" | "saved"; savedAt: string }
+    | { kind: "error"; message: string }
+    | null
+  >(
+    restoredDraft
+      ? { kind: "restored", savedAt: restoredDraft.savedAt }
+      : null,
+  );
+  const dirty = prompt !== initial && prompt !== copiedPrompt;
+  const discardDraft = useCallback(() => {
+    if (removePromptDraft(project.id, card.id)) {
+      onDraftChange();
+      return true;
+    }
+    setDraftStatus({
+      kind: "error",
+      message:
+        "요청문 초안을 지우지 못했어요. 브라우저 저장 권한을 확인한 뒤 다시 시도해 주세요.",
+    });
+    return false;
+  }, [card.id, onDraftChange, project.id]);
+  useUnsavedChanges(dirty, onDirtyChange, discardDraft);
+
+  function updatePrompt(next: string) {
+    setPrompt(next);
+    setResult(null);
+    if (next === initial || next === copiedPrompt) {
+      if (removePromptDraft(project.id, card.id)) {
+        onDraftChange();
+        setDraftStatus(null);
+      } else {
+        setDraftStatus({
+          kind: "error",
+          message:
+            "요청문 초안을 지우지 못했어요. 브라우저 저장 권한을 확인한 뒤 다시 시도해 주세요.",
+        });
+      }
+      return;
+    }
+    const saved = savePromptDraft(project.id, card.id, initial, next);
+    if (saved.ok && (!draftStatus || draftStatus.kind === "error"))
+      onDraftChange();
+    setDraftStatus(
+      saved.ok
+        ? { kind: "saved", savedAt: saved.savedAt }
+        : { kind: "error", message: saved.message },
+    );
+  }
+
   async function copy() {
     try {
       await navigator.clipboard.writeText(prompt);
       setCopiedPrompt(prompt);
+      if (removePromptDraft(project.id, card.id)) {
+        onDraftChange();
+        setDraftStatus(null);
+      } else {
+        setDraftStatus({
+          kind: "error",
+          message:
+            "복사는 완료했지만 요청문 초안을 지우지 못했어요. 브라우저 저장 권한을 확인해 주세요.",
+        });
+      }
       setResult("success");
     } catch {
       setResult("failed");
@@ -680,12 +749,22 @@ export function PromptEditor({
       <textarea
         id="ai-prompt"
         value={prompt}
-        onChange={(e) => {
-          setPrompt(e.target.value);
-          setResult(null);
-        }}
+        onChange={(e) => updatePrompt(e.target.value)}
         rows={16}
       />
+      {draftStatus && (
+        <p
+          className={`form-draft-status ${draftStatus.kind === "error" ? "field-error" : "muted"}`}
+          role={draftStatus.kind === "error" ? "alert" : "status"}
+          aria-live="polite"
+        >
+          {draftStatus.kind === "error"
+            ? draftStatus.message
+            : draftStatus.kind === "restored"
+              ? `임시 저장한 요청문을 복구했어요 · ${formatDate(draftStatus.savedAt)} 임시 저장`
+              : `${formatDate(draftStatus.savedAt)} 이 기기에 요청문 초안 저장됨`}
+        </p>
+      )}
       <p
         role="status"
         aria-live="polite"

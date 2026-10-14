@@ -2,23 +2,30 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
   CARD_FORM_DRAFT_PREFIX,
+  PROMPT_DRAFT_PREFIX,
   PROJECT_FORM_DRAFT_PREFIX,
   PROGRESS_NOTE_DRAFT_PREFIX,
   hasCardFormDraft,
+  hasPromptDraft,
   hasProjectFormDraft,
   hasProgressNoteDraft,
   loadCardFormDraft,
+  loadPromptDraft,
   loadProjectFormDraft,
   loadProgressNoteDraft,
   removeAllCardFormDrafts,
+  removeAllPromptDrafts,
   removeAllProjectFormDrafts,
   removeAllProgressNoteDrafts,
   removeCardFormDraft,
+  removePromptDraft,
   removeProjectFormDraft,
   removeProgressNoteDraft,
   removeProjectCardFormDrafts,
+  removeProjectPromptDrafts,
   removeProjectProgressNoteDrafts,
   saveCardFormDraft,
+  savePromptDraft,
   saveProjectFormDraft,
   saveProgressNoteDraft,
   type CardDraftFields,
@@ -60,6 +67,8 @@ const projectFields: ProjectDraftFields = {
   name: "임시 저장 프로젝트",
   description: "프로젝트 설명",
 };
+const promptBase = "# 프로젝트\n\n저장된 요청문";
+const promptDraft = `${promptBase}\n\n사용자가 추가한 지시`;
 const card = (id: string, updatedAt: string | null = null): Card => ({
   id,
   title: "임시 저장 테스트",
@@ -70,6 +79,93 @@ const card = (id: string, updatedAt: string | null = null): Card => ({
   createdAt: stamp,
   updatedAt: stamp,
   note: { done: "", blocked: "", next: "", updatedAt },
+});
+
+test("요청문 초안은 프로젝트·카드와 생성 원문이 같을 때만 복구된다", () => {
+  const storage = memoryStorage();
+  assert.equal(
+    savePromptDraft("project-1", "card-1", promptBase, promptDraft, storage).ok,
+    true,
+  );
+  assert.equal(
+    loadPromptDraft("project-1", "card-1", promptBase, storage)?.prompt,
+    promptDraft,
+  );
+  assert.equal(
+    hasPromptDraft("project-1", "card-1", promptBase, storage),
+    true,
+  );
+  assert.equal(
+    loadPromptDraft("project-1", "card-2", promptBase, storage),
+    null,
+  );
+  assert.equal(
+    loadPromptDraft(
+      "project-1",
+      "card-1",
+      `${promptBase}\n저장 데이터 변경`,
+      storage,
+    ),
+    null,
+  );
+});
+
+test("잘못된 요청문 초안과 저장소 오류를 복구 데이터로 사용하지 않는다", () => {
+  const storage = memoryStorage();
+  storage.setItem(`${PROMPT_DRAFT_PREFIX}project-1:card-1`, "not-json");
+  assert.equal(
+    loadPromptDraft("project-1", "card-1", promptBase, storage),
+    null,
+  );
+  assert.equal(
+    savePromptDraft("", "card-1", promptBase, promptDraft, storage).ok,
+    false,
+  );
+  assert.equal(
+    savePromptDraft(
+      "project-1",
+      "card-1",
+      promptBase,
+      "x".repeat(100001),
+      storage,
+    ).ok,
+    false,
+  );
+  const blocked = {
+    ...storage,
+    setItem() {
+      throw new DOMException("full", "QuotaExceededError");
+    },
+  } as Storage;
+  assert.equal(
+    savePromptDraft("project-1", "card-1", promptBase, promptDraft, blocked).ok,
+    false,
+  );
+});
+
+test("요청문 초안을 카드·프로젝트·전체 범위로 정리한다", () => {
+  const storage = memoryStorage();
+  savePromptDraft("project-1", "card-1", promptBase, promptDraft, storage);
+  savePromptDraft("project-1", "card-2", promptBase, promptDraft, storage);
+  savePromptDraft("project-2", "card-3", promptBase, promptDraft, storage);
+  storage.setItem("unrelated", "keep");
+  assert.equal(removePromptDraft("project-1", "card-1", storage), true);
+  assert.equal(
+    loadPromptDraft("project-1", "card-1", promptBase, storage),
+    null,
+  );
+  removeProjectPromptDrafts("project-1", storage);
+  assert.equal(
+    loadPromptDraft("project-1", "card-2", promptBase, storage),
+    null,
+  );
+  assert.ok(loadPromptDraft("project-2", "card-3", promptBase, storage));
+  removeAllPromptDrafts(storage);
+  assert.equal(
+    loadPromptDraft("project-2", "card-3", promptBase, storage),
+    null,
+  );
+  assert.equal(storage.getItem("unrelated"), "keep");
 });
 
 test("새 프로젝트와 수정 프로젝트 초안은 대상·저장 기준에 맞게 복구된다", () => {

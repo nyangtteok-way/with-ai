@@ -29,6 +29,7 @@ import {
   STATUSES,
   Status,
   formatDate,
+  generatePrompt,
   newId,
   now,
   parseBackup,
@@ -37,15 +38,19 @@ import {
 import { retryLoad, saveData, useAppStore } from "@/lib/store";
 import {
   hasCardFormDraft,
+  hasPromptDraft,
   hasProjectFormDraft,
   hasProgressNoteDraft,
   removeAllCardFormDrafts,
+  removeAllPromptDrafts,
   removeAllProjectFormDrafts,
   removeAllProgressNoteDrafts,
   removeCardFormDraft,
+  removePromptDraft,
   removeProjectFormDraft,
   removeProgressNoteDraft,
   removeProjectCardFormDrafts,
+  removeProjectPromptDrafts,
   removeProjectProgressNoteDrafts,
 } from "@/lib/drafts";
 import {
@@ -114,6 +119,19 @@ export function Workspace() {
             : [],
         ),
         hasNewCard: project ? hasCardFormDraft(project.id) : false,
+        promptCardIds: new Set(
+          project
+            ? projectCards
+                .filter((card) =>
+                  hasPromptDraft(
+                    project.id,
+                    card.id,
+                    generatePrompt(project, card),
+                  ),
+                )
+                .map((card) => card.id)
+            : [],
+        ),
         projectFormIds: new Set(
           data.projects
             .filter((item) => hasProjectFormDraft(item))
@@ -159,6 +177,12 @@ export function Workspace() {
   function cardNoteLabel(card: Card) {
     const hasCardDraft = draftIndicators.cardFormIds.has(card.id);
     const hasNoteDraft = draftIndicators.noteCardIds.has(card.id);
+    const hasRequestDraft = draftIndicators.promptCardIds.has(card.id);
+    if (hasCardDraft && hasNoteDraft && hasRequestDraft)
+      return "카드·메모·요청문 초안 있음";
+    if (hasCardDraft && hasRequestDraft) return "카드·요청문 초안 있음";
+    if (hasNoteDraft && hasRequestDraft) return "메모·요청문 초안 있음";
+    if (hasRequestDraft) return "요청문 초안 있음";
     if (hasCardDraft && hasNoteDraft) return "카드·메모 초안 있음";
     if (hasCardDraft) return "카드 수정 초안 있음";
     if (hasNoteDraft) return "임시 메모 있음";
@@ -222,6 +246,7 @@ export function Workspace() {
         editingId ? "프로젝트를 수정했어요." : "새 프로젝트를 만들었어요.",
       )
     ) {
+      if (editingId) removeProjectPromptDrafts(editingId);
       selectProject(next.id);
       return true;
     }
@@ -266,6 +291,7 @@ export function Workspace() {
         existing ? "카드를 수정했어요." : "새 작업 카드를 만들었어요.",
       )
     ) {
+      if (existing) removePromptDraft(project.id, card.id);
       setModal(existing ? { kind: "detail", cardId: card.id } : null);
       return true;
     }
@@ -274,7 +300,7 @@ export function Workspace() {
   function saveNote(note: Pick<Card["note"], "done" | "blocked" | "next">) {
     if (!project || !selectedCard) return false;
     const stamp = now();
-    return updateProject(
+    const saved = updateProject(
       {
         ...project,
         updatedAt: stamp,
@@ -285,9 +311,10 @@ export function Workspace() {
         ),
       },
       "진행 메모를 저장했어요.",
-    )
-      ? stamp
-      : false;
+    );
+    if (!saved) return false;
+    removePromptDraft(project.id, selectedCard.id);
+    return stamp;
   }
   function removeProject(id: string) {
     if (
@@ -300,6 +327,7 @@ export function Workspace() {
       if (removed) {
         removeProjectProgressNoteDrafts(removed);
         removeProjectCardFormDrafts(removed.id);
+        removeProjectPromptDrafts(removed.id);
         removeProjectFormDraft(removed.id);
       }
       setModal(null);
@@ -321,6 +349,7 @@ export function Workspace() {
     ) {
       removeProgressNoteDraft(id);
       removeCardFormDraft(project.id, id);
+      removePromptDraft(project.id, id);
       setModal(null);
     }
   }
@@ -875,6 +904,7 @@ export function Workspace() {
             onPrompt={() =>
               requestModal({ kind: "prompt", cardId: selectedCard.id })
             }
+            hasPromptDraft={draftIndicators.promptCardIds.has(selectedCard.id)}
             onDirtyChange={onUnsavedChange}
             onDraftChange={onDraftChange}
           />
@@ -898,9 +928,11 @@ export function Workspace() {
             카드로 돌아가기
           </button>
           <PromptEditor
+            key={`${project.id}:${selectedCard.id}`}
             project={project}
             card={selectedCard}
             onDirtyChange={onUnsavedChange}
+            onDraftChange={onDraftChange}
           />
         </Dialog>
       )}
@@ -1045,6 +1077,7 @@ export function Workspace() {
                 if (persist(modal.data, "백업 데이터를 가져왔어요.", true)) {
                   removeAllProgressNoteDrafts();
                   removeAllCardFormDrafts();
+                  removeAllPromptDrafts();
                   removeAllProjectFormDrafts();
                   setActiveId(null);
                   setFilter("all");

@@ -155,6 +155,142 @@ test("요청문은 복사 실패 시 보호하고 실제로 복사한 버전만 
   await expect(prompt).toHaveValue(original);
 });
 
+test("저장 전 종료된 AI 요청문을 복구하고 복사 뒤 초안을 정리한다", async ({
+  page,
+  context,
+}) => {
+  await seedProject(page);
+  await page.locator(".task-card").click();
+  await page
+    .getByRole("button", { name: "AI 작업 요청문", exact: true })
+    .click();
+  const prompt = page.getByLabel("AI에게 전달할 요청문");
+  const original = await prompt.inputValue();
+  const draft = `${original}\n\n모바일 종료 뒤에도 이어 쓸 요청`;
+  await prompt.fill(draft);
+  await expect(page.getByText(/이 기기에 요청문 초안 저장됨/)).toBeVisible();
+  expect(
+    await page.evaluate(() => localStorage.getItem("with-ai:data:v1")),
+  ).not.toContain("모바일 종료 뒤에도 이어 쓸 요청");
+
+  await page.close({ runBeforeUnload: false });
+  const recovered = await context.newPage();
+  await recovered.goto("/");
+  await expect(recovered.locator(".task-card")).toContainText(
+    "요청문 초안 있음",
+  );
+  await recovered.locator(".task-card").click();
+  await recovered
+    .getByRole("button", { name: "작성 중 요청문 계속", exact: true })
+    .click();
+  await expect(
+    recovered.getByText(/임시 저장한 요청문을 복구했어요/),
+  ).toBeVisible();
+  await expect(recovered.getByLabel("AI에게 전달할 요청문")).toHaveValue(
+    draft,
+  );
+  for (const width of [320, 390, 1440]) {
+    await recovered.setViewportSize({ width, height: 844 });
+    expect(
+      await recovered
+        .getByRole("dialog")
+        .evaluate((element) => element.scrollWidth <= element.clientWidth),
+    ).toBe(true);
+    expect(
+      await recovered.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+  await recovered.setViewportSize({ width: 390, height: 844 });
+
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await recovered
+    .getByRole("button", { name: "요청문 복사", exact: true })
+    .click();
+  await expect(
+    recovered.getByText("요청문을 복사했어요.", { exact: false }),
+  ).toBeVisible();
+  expect(
+    await recovered.evaluate(() =>
+      Array.from({ length: localStorage.length }, (_, index) =>
+        localStorage.key(index),
+      ).some((key) => key?.startsWith("with-ai:prompt-draft:v1:")),
+    ),
+  ).toBe(false);
+  await recovered
+    .getByRole("button", { name: "카드로 돌아가기", exact: true })
+    .click();
+  await expect(
+    recovered.getByRole("button", { name: "AI 작업 요청문", exact: true }),
+  ).toBeVisible();
+  await recovered
+    .getByRole("button", { name: "AI 작업 요청문", exact: true })
+    .click();
+  await expect(recovered.getByLabel("AI에게 전달할 요청문")).toHaveValue(
+    original,
+  );
+});
+
+test("AI 요청문 초안 저장 실패를 알리고 입력과 복사 경로를 유지한다", async ({
+  page,
+  context,
+}) => {
+  await seedProject(page);
+  await page.locator(".task-card").click();
+  await page
+    .getByRole("button", { name: "AI 작업 요청문", exact: true })
+    .click();
+  await page.evaluate(() => {
+    const original = Storage.prototype.setItem;
+    (
+      window as typeof window & { restorePromptDraftSetItem?: () => void }
+    ).restorePromptDraftSetItem = () => {
+      Storage.prototype.setItem = original;
+    };
+    Storage.prototype.setItem = function (key, value) {
+      if (key.startsWith("with-ai:prompt-draft:v1:")) {
+        throw new DOMException("full", "QuotaExceededError");
+      }
+      return original.call(this, key, value);
+    };
+  });
+  const prompt = page.getByLabel("AI에게 전달할 요청문");
+  const original = await prompt.inputValue();
+  await prompt.fill(`${original}\n초안 저장 실패에도 유지할 내용`);
+  await expect(page.locator(".field-error")).toContainText(
+    "요청문 초안을 임시 저장하지 못했어요",
+  );
+  await expect(prompt).toHaveValue(/초안 저장 실패에도 유지할 내용/);
+  await page.evaluate(() => {
+    (
+      window as typeof window & { restorePromptDraftSetItem?: () => void }
+    ).restorePromptDraftSetItem?.();
+  });
+  await prompt.fill(`${original}\n실패 후 다시 저장한 요청문`);
+  await expect(page.getByText(/이 기기에 요청문 초안 저장됨/)).toBeVisible();
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await page
+    .getByRole("button", { name: "요청문 복사", exact: true })
+    .click();
+  await expect(
+    page.getByText("요청문을 복사했어요.", { exact: false }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      Array.from({ length: localStorage.length }, (_, index) =>
+        localStorage.key(index),
+      ).some((key) => key?.startsWith("with-ai:prompt-draft:v1:")),
+    ),
+  ).toBe(false);
+  await page
+    .getByRole("button", { name: "카드로 돌아가기", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "AI 작업 요청문", exact: true }),
+  ).toBeVisible();
+});
+
 test("새로고침 확인을 취소하면 입력을 유지하고 저장 후에는 경고 없이 새로고침한다", async ({ page }) => {
   await seedProject(page);
   await page.locator(".task-card").click();

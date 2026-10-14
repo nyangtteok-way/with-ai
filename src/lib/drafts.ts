@@ -3,6 +3,9 @@ import { STATUSES, type Card, type ProgressNote, type Project } from "./model";
 export const PROGRESS_NOTE_DRAFT_PREFIX = "with-ai:note-draft:v1:";
 export const CARD_FORM_DRAFT_PREFIX = "with-ai:card-draft:v1:";
 export const PROJECT_FORM_DRAFT_PREFIX = "with-ai:project-draft:v1:";
+export const PROMPT_DRAFT_PREFIX = "with-ai:prompt-draft:v1:";
+
+const MAX_PROMPT_LENGTH = 100000;
 
 type NoteFields = Pick<ProgressNote, "done" | "blocked" | "next">;
 export type CardDraftFields = Pick<
@@ -40,6 +43,15 @@ interface StoredProjectFormDraft {
   savedAt: string;
 }
 
+interface StoredPromptDraft {
+  version: 1;
+  projectId: string;
+  cardId: string;
+  basePrompt: string;
+  prompt: string;
+  savedAt: string;
+}
+
 export type ProgressNoteDraft = Pick<
   StoredProgressNoteDraft,
   "note" | "savedAt"
@@ -50,6 +62,7 @@ export type ProjectFormDraft = Pick<
   StoredProjectFormDraft,
   "fields" | "savedAt"
 >;
+export type PromptDraft = Pick<StoredPromptDraft, "prompt" | "savedAt">;
 
 type DraftResult =
   | { ok: true; savedAt: string }
@@ -76,6 +89,14 @@ function cardProjectPrefix(projectId: string) {
 function projectKey(projectId: string | null) {
   const target = projectId === null ? "new" : `edit:${encodeURIComponent(projectId)}`;
   return `${PROJECT_FORM_DRAFT_PREFIX}${target}`;
+}
+
+function promptKey(projectId: string, cardId: string) {
+  return `${PROMPT_DRAFT_PREFIX}${encodeURIComponent(projectId)}:${encodeURIComponent(cardId)}`;
+}
+
+function promptProjectPrefix(projectId: string) {
+  return `${PROMPT_DRAFT_PREFIX}${encodeURIComponent(projectId)}:`;
 }
 
 function isNote(value: unknown): value is NoteFields {
@@ -132,6 +153,10 @@ function sameProjectFields(
   return (
     first.name === second.name && first.description === second.description
   );
+}
+
+function isPromptText(value: unknown): value is string {
+  return typeof value === "string" && value.length <= MAX_PROMPT_LENGTH;
 }
 
 function isStoredDraft(
@@ -428,6 +453,107 @@ export function hasProjectFormDraft(
 
 export function removeAllProjectFormDrafts(storage?: StorageLike) {
   removeDraftsWithPrefix(PROJECT_FORM_DRAFT_PREFIX, storage);
+}
+
+function isStoredPromptDraft(
+  value: unknown,
+  projectId: string,
+  cardId: string,
+  basePrompt: string,
+): value is StoredPromptDraft {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const draft = value as Record<string, unknown>;
+  return (
+    draft.version === 1 &&
+    draft.projectId === projectId &&
+    draft.cardId === cardId &&
+    draft.basePrompt === basePrompt &&
+    isPromptText(draft.basePrompt) &&
+    isPromptText(draft.prompt) &&
+    typeof draft.savedAt === "string" &&
+    Number.isFinite(Date.parse(draft.savedAt))
+  );
+}
+
+export function loadPromptDraft(
+  projectId: string,
+  cardId: string,
+  basePrompt: string,
+  storage?: StorageLike,
+): PromptDraft | null {
+  try {
+    if (!isPromptText(basePrompt)) return null;
+    const raw = getStorage(storage).getItem(promptKey(projectId, cardId));
+    if (raw === null) return null;
+    const value: unknown = JSON.parse(raw);
+    if (!isStoredPromptDraft(value, projectId, cardId, basePrompt)) return null;
+    return { prompt: value.prompt, savedAt: value.savedAt };
+  } catch {
+    return null;
+  }
+}
+
+export function savePromptDraft(
+  projectId: string,
+  cardId: string,
+  basePrompt: string,
+  prompt: string,
+  storage?: StorageLike,
+): DraftResult {
+  try {
+    if (!projectId || !cardId || !isPromptText(basePrompt) || !isPromptText(prompt))
+      throw new Error("invalid prompt draft");
+    const savedAt = new Date().toISOString();
+    const draft: StoredPromptDraft = {
+      version: 1,
+      projectId,
+      cardId,
+      basePrompt,
+      prompt,
+      savedAt,
+    };
+    getStorage(storage).setItem(promptKey(projectId, cardId), JSON.stringify(draft));
+    return { ok: true, savedAt };
+  } catch {
+    return {
+      ok: false,
+      message:
+        "요청문 초안을 임시 저장하지 못했어요. 브라우저 저장 공간이나 권한을 확인해 주세요.",
+    };
+  }
+}
+
+export function removePromptDraft(
+  projectId: string,
+  cardId: string,
+  storage?: StorageLike,
+) {
+  try {
+    getStorage(storage).removeItem(promptKey(projectId, cardId));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function hasPromptDraft(
+  projectId: string,
+  cardId: string,
+  basePrompt: string,
+  storage?: StorageLike,
+) {
+  return !!loadPromptDraft(projectId, cardId, basePrompt, storage);
+}
+
+export function removeProjectPromptDrafts(
+  projectId: string,
+  storage?: StorageLike,
+) {
+  removeDraftsWithPrefix(promptProjectPrefix(projectId), storage);
+}
+
+export function removeAllPromptDrafts(storage?: StorageLike) {
+  removeDraftsWithPrefix(PROMPT_DRAFT_PREFIX, storage);
 }
 
 function removeDraftsWithPrefix(prefix: string, storage?: StorageLike) {
