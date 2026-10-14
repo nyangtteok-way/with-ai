@@ -37,10 +37,13 @@ import {
 import { retryLoad, saveData, useAppStore } from "@/lib/store";
 import {
   hasCardFormDraft,
+  hasProjectFormDraft,
   hasProgressNoteDraft,
   removeAllCardFormDrafts,
+  removeAllProjectFormDrafts,
   removeAllProgressNoteDrafts,
   removeCardFormDraft,
+  removeProjectFormDraft,
   removeProgressNoteDraft,
   removeProjectCardFormDrafts,
   removeProjectProgressNoteDrafts,
@@ -111,9 +114,15 @@ export function Workspace() {
             : [],
         ),
         hasNewCard: project ? hasCardFormDraft(project.id) : false,
+        projectFormIds: new Set(
+          data.projects
+            .filter((item) => hasProjectFormDraft(item))
+            .map((item) => item.id),
+        ),
+        hasNewProject: hasProjectFormDraft(),
       };
     },
-    [project, draftRevision],
+    [data.projects, project, draftRevision],
   );
   const summary = summarize(project?.cards ?? []);
   const searchTerm = search.trim().toLowerCase();
@@ -291,6 +300,7 @@ export function Workspace() {
       if (removed) {
         removeProjectProgressNoteDrafts(removed);
         removeProjectCardFormDrafts(removed.id);
+        removeProjectFormDraft(removed.id);
       }
       setModal(null);
       setFilter("all");
@@ -358,6 +368,9 @@ export function Workspace() {
         >
           <Folder size={18} />
           <span>{p.name}</span>
+          {draftIndicators.projectFormIds.has(p.id) && (
+            <span className="nav-draft">초안</span>
+          )}
           <span className="nav-count">{p.cards.length}</span>
         </button>
       ))}
@@ -366,7 +379,11 @@ export function Workspace() {
         onClick={() => setModal({ kind: "project" })}
       >
         <Plus size={18} />
-        <span>새 프로젝트</span>
+        <span>
+          {draftIndicators.hasNewProject
+            ? "작성 중 프로젝트 계속"
+            : "새 프로젝트"}
+        </span>
       </button>
     </div>
   );
@@ -476,7 +493,12 @@ export function Workspace() {
                     <span />
                     나의 프로젝트
                   </p>
-                  <h1>{project.name}</h1>
+                  <div className="project-title-row">
+                    <h1>{project.name}</h1>
+                    {draftIndicators.projectFormIds.has(project.id) && (
+                      <span>수정 초안 있음</span>
+                    )}
+                  </div>
                   <p className="project-description">
                     {project.description ||
                       "작은 할 일부터, 하나씩 완성해 보세요."}
@@ -722,7 +744,10 @@ export function Workspace() {
                 disabled={!!error}
                 onClick={() => setModal({ kind: "project" })}
               >
-                <Plus size={20} />첫 프로젝트 만들기
+                <Plus size={20} />
+                {draftIndicators.hasNewProject
+                  ? "작성 중 프로젝트 계속"
+                  : "첫 프로젝트 만들기"}
               </button>
               <p className="first-use-note">
                 <ShieldCheck size={16} />
@@ -750,7 +775,9 @@ export function Workspace() {
               ? draftIndicators.hasNewCard
                 ? "작성 중 카드 계속"
                 : "작업 카드 추가"
-              : "프로젝트 만들기"}
+              : draftIndicators.hasNewProject
+                ? "작성 중 프로젝트 계속"
+                : "프로젝트 만들기"}
           </span>
         </button>
         <button onClick={() => setModal({ kind: "settings" })}>
@@ -788,10 +815,12 @@ export function Workspace() {
           onClose={() => requestModal(null)}
         >
           <ProjectForm
+            key={modal.projectId ?? "new"}
             project={data.projects.find((p) => p.id === modal.projectId)}
             onSave={saveProject}
             onClose={() => requestModal(null)}
             onDirtyChange={onUnsavedChange}
+            onDraftChange={onDraftChange}
           />
           {modal.projectId && (
             <button
@@ -1016,6 +1045,7 @@ export function Workspace() {
                 if (persist(modal.data, "백업 데이터를 가져왔어요.", true)) {
                   removeAllProgressNoteDrafts();
                   removeAllCardFormDrafts();
+                  removeAllProjectFormDrafts();
                   setActiveId(null);
                   setFilter("all");
                   setSearch("");

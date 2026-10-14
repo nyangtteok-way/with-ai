@@ -495,3 +495,171 @@ test("작업 카드 초안 저장 실패를 알리고 입력과 영구 저장 �
     page.locator(".task-card").filter({ hasText: "실패 후 저장할 카드" }),
   ).toBeVisible();
 });
+
+test("저장 전 종료된 새 프로젝트와 수정 프로젝트를 복구하고 영구 저장 뒤 초안을 정리한다", async ({
+  page,
+  context,
+}) => {
+  await page.goto("/");
+  await page
+    .locator(".first-use")
+    .getByRole("button", { name: "첫 프로젝트 만들기", exact: true })
+    .click();
+  await page.getByLabel("프로젝트 이름").fill("강제 종료 전 프로젝트");
+  await page
+    .getByLabel("프로젝트 설명")
+    .fill("모바일에서 이어 쓸 프로젝트 설명");
+  await expect(page.getByText(/이 기기에 프로젝트 초안 저장됨/)).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem("with-ai:data:v1"))).toBeNull();
+
+  await page.close({ runBeforeUnload: false });
+  let recovered = await context.newPage();
+  await recovered.goto("/");
+  const continueProject = recovered
+    .locator(".first-use")
+    .getByRole("button", {
+      name: "작성 중 프로젝트 계속",
+      exact: true,
+    });
+  await expect(continueProject).toBeVisible();
+  await continueProject.click();
+  await expect(
+    recovered.getByText(/임시 저장한 프로젝트 내용을 복구했어요/),
+  ).toBeVisible();
+  await expect(recovered.getByLabel("프로젝트 이름")).toHaveValue(
+    "강제 종료 전 프로젝트",
+  );
+  await expect(recovered.getByLabel("프로젝트 설명")).toHaveValue(
+    "모바일에서 이어 쓸 프로젝트 설명",
+  );
+  for (const width of [320, 390, 1440]) {
+    await recovered.setViewportSize({ width, height: 844 });
+    expect(
+      await recovered
+        .getByRole("dialog")
+        .evaluate((element) => element.scrollWidth <= element.clientWidth),
+    ).toBe(true);
+    expect(
+      await recovered.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+  await recovered.setViewportSize({ width: 390, height: 844 });
+  await recovered.getByRole("button", { name: "닫기", exact: true }).click();
+  const confirm = recovered.getByRole("dialog", {
+    name: "작성 중인 내용을 버릴까요?",
+  });
+  await expect(confirm).toBeVisible();
+  await confirm.getByRole("button", { name: "계속 작성" }).click();
+  await expect(recovered.getByLabel("프로젝트 이름")).toHaveValue(
+    "강제 종료 전 프로젝트",
+  );
+  await recovered
+    .getByRole("button", { name: "프로젝트 만들기", exact: true })
+    .click();
+  await expect(
+    recovered.getByRole("heading", { name: "강제 종료 전 프로젝트" }),
+  ).toBeVisible();
+  expect(
+    await recovered.evaluate(() =>
+      Array.from({ length: localStorage.length }, (_, index) =>
+        localStorage.key(index),
+      ).some((key) => key?.startsWith("with-ai:project-draft:v1:")),
+    ),
+  ).toBe(false);
+
+  await recovered
+    .getByRole("button", { name: "프로젝트 수정 및 삭제", exact: true })
+    .click();
+  await recovered.getByLabel("프로젝트 이름").fill("수정 중인 프로젝트 이름");
+  await recovered
+    .getByLabel("프로젝트 설명")
+    .fill("종료 뒤 복구할 수정 설명");
+  await expect(
+    recovered.getByText(/이 기기에 프로젝트 초안 저장됨/),
+  ).toBeVisible();
+  await recovered.close({ runBeforeUnload: false });
+
+  recovered = await context.newPage();
+  await recovered.goto("/");
+  await expect(
+    recovered.getByText("수정 초안 있음", { exact: true }),
+  ).toBeVisible();
+  await recovered
+    .getByRole("button", { name: "프로젝트 수정 및 삭제", exact: true })
+    .click();
+  await expect(
+    recovered.getByText(/임시 저장한 프로젝트 내용을 복구했어요/),
+  ).toBeVisible();
+  await expect(recovered.getByLabel("프로젝트 이름")).toHaveValue(
+    "수정 중인 프로젝트 이름",
+  );
+  await expect(recovered.getByLabel("프로젝트 설명")).toHaveValue(
+    "종료 뒤 복구할 수정 설명",
+  );
+  await recovered
+    .getByRole("button", { name: "변경 저장", exact: true })
+    .click();
+  await expect(
+    recovered.getByRole("heading", { name: "수정 중인 프로젝트 이름" }),
+  ).toBeVisible();
+  await expect(
+    recovered.getByText("수정 초안 있음", { exact: true }),
+  ).toHaveCount(0);
+  expect(
+    await recovered.evaluate(() =>
+      Array.from({ length: localStorage.length }, (_, index) =>
+        localStorage.key(index),
+      ).some((key) => key?.startsWith("with-ai:project-draft:v1:")),
+    ),
+  ).toBe(false);
+});
+
+test("프로젝트 초안 저장 실패를 알리고 입력과 영구 저장 경로를 유지한다", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page
+    .locator(".first-use")
+    .getByRole("button", { name: "첫 프로젝트 만들기", exact: true })
+    .click();
+  await page.evaluate(() => {
+    const original = Storage.prototype.setItem;
+    (
+      window as typeof window & { restoreProjectDraftSetItem?: () => void }
+    ).restoreProjectDraftSetItem = () => {
+      Storage.prototype.setItem = original;
+    };
+    Storage.prototype.setItem = function (key, value) {
+      if (key.startsWith("with-ai:project-draft:v1:")) {
+        throw new DOMException("full", "QuotaExceededError");
+      }
+      return original.call(this, key, value);
+    };
+  });
+  await page.getByLabel("프로젝트 이름").fill("실패해도 유지할 프로젝트");
+  await expect(page.locator(".field-error")).toContainText(
+    "프로젝트 초안을 임시 저장하지 못했어요",
+  );
+  await expect(page.getByLabel("프로젝트 이름")).toHaveValue(
+    "실패해도 유지할 프로젝트",
+  );
+  await page.evaluate(() => {
+    (
+      window as typeof window & { restoreProjectDraftSetItem?: () => void }
+    ).restoreProjectDraftSetItem?.();
+  });
+  await page.getByLabel("프로젝트 이름").fill("실패 후 저장할 프로젝트");
+  await expect(page.getByText(/이 기기에 프로젝트 초안 저장됨/)).toBeVisible();
+  await page
+    .getByRole("button", { name: "프로젝트 만들기", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "실패 후 저장할 프로젝트" }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "실패 후 저장할 프로젝트" }),
+  ).toBeVisible();
+});

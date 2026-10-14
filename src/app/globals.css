@@ -164,6 +164,15 @@ select {
   padding: 3px;
   border-radius: 5px;
 }
+.nav-draft {
+  flex-shrink: 0;
+  color: #b04b23;
+  background: #fff0e8;
+  border-radius: 5px;
+  padding: 3px 5px;
+  font-size: 10px;
+  font-weight: 700;
+}
 .add-project {
   margin-top: 4px;
   color: #888f9b;
@@ -290,6 +299,20 @@ select {
   letter-spacing: -1.2px;
   overflow-wrap: anywhere;
   margin: 10px 0;
+}
+.project-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.project-title-row > span {
+  color: #b04b23;
+  background: #fff0e8;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 700;
 }
 .project-description {
   color: #838b98;

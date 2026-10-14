@@ -8,12 +8,16 @@ import {
 import { Check, Copy, FileText, Pencil, Sparkles, Trash2 } from "lucide-react";
 import {
   loadCardFormDraft,
+  loadProjectFormDraft,
   loadProgressNoteDraft,
   removeCardFormDraft,
+  removeProjectFormDraft,
   removeProgressNoteDraft,
   saveCardFormDraft,
+  saveProjectFormDraft,
   saveProgressNoteDraft,
   type CardDraftFields,
+  type ProjectDraftFields,
 } from "@/lib/drafts";
 import {
   useUnsavedChanges,
@@ -105,42 +109,105 @@ export function ProjectForm({
   onSave,
   onClose,
   onDirtyChange,
+  onDraftChange,
 }: {
   project?: Project;
   onSave: (name: string, description: string) => boolean;
   onClose: () => void;
   onDirtyChange: UnsavedChangeHandler;
+  onDraftChange: () => void;
 }) {
-  const [initial] = useState(() => ({
-    name: project?.name ?? "",
-    description: project?.description ?? "",
-  }));
-  const [name, setName] = useState(initial.name);
-  const [description, setDescription] = useState(initial.description);
-  const [error, setError] = useState("");
-  useUnsavedChanges(
-    name !== initial.name || description !== initial.description,
-    onDirtyChange,
+  const [draftTarget] = useState(() => {
+    const base: ProjectDraftFields | null = project
+      ? { name: project.name, description: project.description }
+      : null;
+    return { projectId: project?.id ?? null, base };
+  });
+  const [initial] = useState<ProjectDraftFields>(() =>
+    draftTarget.base ?? { name: "", description: "" },
   );
+  const [restoredDraft] = useState(() =>
+    loadProjectFormDraft(draftTarget.projectId, draftTarget.base),
+  );
+  const [fields, setFields] = useState(restoredDraft?.fields ?? initial);
+  const [error, setError] = useState("");
+  const [draftStatus, setDraftStatus] = useState<
+    | { kind: "restored" | "saved"; savedAt: string }
+    | { kind: "error"; message: string }
+    | null
+  >(
+    restoredDraft
+      ? { kind: "restored", savedAt: restoredDraft.savedAt }
+      : null,
+  );
+  const dirty =
+    fields.name !== initial.name || fields.description !== initial.description;
+  const discardDraft = useCallback(() => {
+    if (removeProjectFormDraft(draftTarget.projectId)) {
+      onDraftChange();
+      return true;
+    }
+    setDraftStatus({
+      kind: "error",
+      message:
+        "프로젝트 초안을 지우지 못했어요. 브라우저 저장 권한을 확인한 뒤 다시 시도해 주세요.",
+    });
+    return false;
+  }, [draftTarget.projectId, onDraftChange]);
+  useUnsavedChanges(dirty, onDirtyChange, discardDraft);
+
+  function update(key: keyof ProjectDraftFields, value: string) {
+    const next = { ...fields, [key]: value };
+    setFields(next);
+    if (key === "name") setError("");
+    const matchesSaved =
+      next.name === initial.name && next.description === initial.description;
+    if (matchesSaved) {
+      if (removeProjectFormDraft(draftTarget.projectId)) {
+        onDraftChange();
+        setDraftStatus(null);
+      } else {
+        setDraftStatus({
+          kind: "error",
+          message:
+            "프로젝트 초안을 지우지 못했어요. 브라우저 저장 권한을 확인한 뒤 다시 시도해 주세요.",
+        });
+      }
+      return;
+    }
+    const result = saveProjectFormDraft(
+      draftTarget.projectId,
+      draftTarget.base,
+      next,
+    );
+    if (result.ok && (!draftStatus || draftStatus.kind === "error"))
+      onDraftChange();
+    setDraftStatus(
+      result.ok
+        ? { kind: "saved", savedAt: result.savedAt }
+        : { kind: "error", message: result.message },
+    );
+  }
   function submit(e: FormEvent) {
     e.preventDefault();
-    if (!name.trim()) {
+    if (!fields.name.trim()) {
       setError("프로젝트 이름을 입력해 주세요.");
       document.getElementById("field-project-name")?.focus();
       return;
     }
-    onSave(name.trim(), description.trim());
+    if (onSave(fields.name.trim(), fields.description.trim())) {
+      removeProjectFormDraft(draftTarget.projectId);
+      onDraftChange();
+      setDraftStatus(null);
+    }
   }
   return (
     <form onSubmit={submit} noValidate>
       <Field
         label="프로젝트 이름"
         name="project-name"
-        value={name}
-        onChange={(v) => {
-          setName(v);
-          setError("");
-        }}
+        value={fields.name}
+        onChange={(v) => update("name", v)}
         max={100}
         required
         error={error}
@@ -149,11 +216,24 @@ export function ProjectForm({
       <Field
         label="프로젝트 설명"
         name="project-description"
-        value={description}
-        onChange={setDescription}
+        value={fields.description}
+        onChange={(v) => update("description", v)}
         multiline
         hint="목적과 만들고 싶은 모습을 자유롭게 적어 주세요."
       />
+      {draftStatus && (
+        <p
+          className={`form-draft-status ${draftStatus.kind === "error" ? "field-error" : "muted"}`}
+          role={draftStatus.kind === "error" ? "alert" : "status"}
+          aria-live="polite"
+        >
+          {draftStatus.kind === "error"
+            ? draftStatus.message
+            : draftStatus.kind === "restored"
+              ? `임시 저장한 프로젝트 내용을 복구했어요 · ${formatDate(draftStatus.savedAt)} 임시 저장`
+              : `${formatDate(draftStatus.savedAt)} 이 기기에 프로젝트 초안 저장됨`}
+        </p>
+      )}
       <FormActions onClose={onClose}>
         {project ? "변경 저장" : "프로젝트 만들기"}
       </FormActions>

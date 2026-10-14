@@ -2,20 +2,27 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
   CARD_FORM_DRAFT_PREFIX,
+  PROJECT_FORM_DRAFT_PREFIX,
   PROGRESS_NOTE_DRAFT_PREFIX,
   hasCardFormDraft,
+  hasProjectFormDraft,
   hasProgressNoteDraft,
   loadCardFormDraft,
+  loadProjectFormDraft,
   loadProgressNoteDraft,
   removeAllCardFormDrafts,
+  removeAllProjectFormDrafts,
   removeAllProgressNoteDrafts,
   removeCardFormDraft,
+  removeProjectFormDraft,
   removeProgressNoteDraft,
   removeProjectCardFormDrafts,
   removeProjectProgressNoteDrafts,
   saveCardFormDraft,
+  saveProjectFormDraft,
   saveProgressNoteDraft,
   type CardDraftFields,
+  type ProjectDraftFields,
 } from "../src/lib/drafts";
 import type { Card, Project } from "../src/lib/model";
 
@@ -49,6 +56,10 @@ const cardFields: CardDraftFields = {
   acceptance: "입력 유지",
   status: "doing",
 };
+const projectFields: ProjectDraftFields = {
+  name: "임시 저장 프로젝트",
+  description: "프로젝트 설명",
+};
 const card = (id: string, updatedAt: string | null = null): Card => ({
   id,
   title: "임시 저장 테스트",
@@ -59,6 +70,94 @@ const card = (id: string, updatedAt: string | null = null): Card => ({
   createdAt: stamp,
   updatedAt: stamp,
   note: { done: "", blocked: "", next: "", updatedAt },
+});
+
+test("새 프로젝트와 수정 프로젝트 초안은 대상·저장 기준에 맞게 복구된다", () => {
+  const storage = memoryStorage();
+  assert.equal(
+    saveProjectFormDraft(null, null, projectFields, storage).ok,
+    true,
+  );
+  assert.deepEqual(
+    loadProjectFormDraft(null, null, storage)?.fields,
+    projectFields,
+  );
+  assert.equal(hasProjectFormDraft(undefined, storage), true);
+
+  const changed = { ...projectFields, name: "수정 중인 프로젝트" };
+  assert.equal(
+    saveProjectFormDraft("project-1", projectFields, changed, storage).ok,
+    true,
+  );
+  assert.deepEqual(
+    loadProjectFormDraft("project-1", projectFields, storage)?.fields,
+    changed,
+  );
+  assert.equal(
+    hasProjectFormDraft(
+      { id: "project-1", ...projectFields },
+      storage,
+    ),
+    true,
+  );
+  assert.equal(
+    loadProjectFormDraft(
+      "project-1",
+      { ...projectFields, description: "다른 탭에서 변경" },
+      storage,
+    ),
+    null,
+  );
+});
+
+test("잘못된 프로젝트 초안과 저장소 오류를 복구 데이터로 사용하지 않는다", () => {
+  const storage = memoryStorage();
+  storage.setItem(`${PROJECT_FORM_DRAFT_PREFIX}new`, "not-json");
+  assert.equal(loadProjectFormDraft(null, null, storage), null);
+  assert.equal(
+    saveProjectFormDraft(
+      null,
+      null,
+      { ...projectFields, name: "x".repeat(101) },
+      storage,
+    ).ok,
+    false,
+  );
+  assert.equal(
+    saveProjectFormDraft("project-1", null, projectFields, storage).ok,
+    false,
+  );
+  const blocked = {
+    ...storage,
+    setItem() {
+      throw new DOMException("full", "QuotaExceededError");
+    },
+  } as Storage;
+  assert.equal(
+    saveProjectFormDraft(null, null, projectFields, blocked).ok,
+    false,
+  );
+});
+
+test("프로젝트 초안을 대상별·전체 범위로 정리한다", () => {
+  const storage = memoryStorage();
+  saveProjectFormDraft(null, null, projectFields, storage);
+  saveProjectFormDraft("project-1", projectFields, projectFields, storage);
+  saveProjectFormDraft("project-2", projectFields, projectFields, storage);
+  storage.setItem("unrelated", "keep");
+  assert.equal(removeProjectFormDraft("project-1", storage), true);
+  assert.equal(
+    loadProjectFormDraft("project-1", projectFields, storage),
+    null,
+  );
+  assert.ok(loadProjectFormDraft(null, null, storage));
+  removeAllProjectFormDrafts(storage);
+  assert.equal(loadProjectFormDraft(null, null, storage), null);
+  assert.equal(
+    loadProjectFormDraft("project-2", projectFields, storage),
+    null,
+  );
+  assert.equal(storage.getItem("unrelated"), "keep");
 });
 
 test("새 카드와 수정 카드 초안은 프로젝트·카드·저장 기준에 맞게 복구된다", () => {
