@@ -35,6 +35,29 @@ import {
   generatePrompt,
   statusLabel,
 } from "@/lib/model";
+import { reconcileFields, sameFields } from "@/lib/conflicts";
+
+export type EntitySaveResult<T> =
+  | { ok: true }
+  | { ok: false; conflict?: T };
+export type NoteFields = Pick<Card["note"], "done" | "blocked" | "next">;
+export type NoteSaveResult =
+  | { ok: true; savedAt: string }
+  | { ok: false; conflict?: Card["note"] };
+
+function describeConflict<T extends object>(
+  changedKeys: (keyof T)[],
+  conflictingKeys: (keyof T)[],
+  labels: Record<keyof T, string>,
+  fallback: string,
+) {
+  const changed = changedKeys.map((key) => labels[key]).join("·");
+  const conflicting = conflictingKeys.map((key) => labels[key]).join("·");
+  if (conflicting) {
+    return `다른 탭에서도 ${conflicting} 항목을 수정했어요. 현재 탭 입력을 유지했고 아직 덮어쓰지 않았어요. 내용을 확인한 뒤 다시 저장해 주세요.`;
+  }
+  return `다른 탭에서 ${changed || fallback}을 저장해 최신 내용을 함께 반영했어요. 현재 입력은 유지했으며, 내용을 확인한 뒤 다시 저장해 주세요.`;
+}
 export function Field({
   label,
   name,
@@ -115,7 +138,11 @@ export function ProjectForm({
   onDraftChange,
 }: {
   project?: Project;
-  onSave: (name: string, description: string) => boolean;
+  onSave: (
+    name: string,
+    description: string,
+    base: ProjectDraftFields | null,
+  ) => EntitySaveResult<ProjectDraftFields>;
   onClose: () => void;
   onDirtyChange: UnsavedChangeHandler;
   onDraftChange: () => void;
@@ -129,11 +156,13 @@ export function ProjectForm({
   const [initial] = useState<ProjectDraftFields>(() =>
     draftTarget.base ?? { name: "", description: "" },
   );
+  const [base, setBase] = useState(draftTarget.base);
   const [restoredDraft] = useState(() =>
     loadProjectFormDraft(draftTarget.projectId, draftTarget.base),
   );
   const [fields, setFields] = useState(restoredDraft?.fields ?? initial);
   const [error, setError] = useState("");
+  const [conflictMessage, setConflictMessage] = useState("");
   const [draftStatus, setDraftStatus] = useState<
     | { kind: "restored" | "saved"; savedAt: string }
     | { kind: "error"; message: string }
@@ -143,8 +172,8 @@ export function ProjectForm({
       ? { kind: "restored", savedAt: restoredDraft.savedAt }
       : null,
   );
-  const dirty =
-    fields.name !== initial.name || fields.description !== initial.description;
+  const savedFields = base ?? initial;
+  const dirty = !sameFields(fields, savedFields);
   const discardDraft = useCallback(() => {
     if (removeProjectFormDraft(draftTarget.projectId)) {
       onDraftChange();
@@ -163,9 +192,9 @@ export function ProjectForm({
     const next = { ...fields, [key]: value };
     setFields(next);
     if (key === "name") setError("");
-    const matchesSaved =
-      next.name === initial.name && next.description === initial.description;
+    const matchesSaved = sameFields(next, savedFields);
     if (matchesSaved) {
+      setConflictMessage("");
       if (removeProjectFormDraft(draftTarget.projectId)) {
         onDraftChange();
         setDraftStatus(null);
@@ -180,7 +209,7 @@ export function ProjectForm({
     }
     const result = saveProjectFormDraft(
       draftTarget.projectId,
-      draftTarget.base,
+      base,
       next,
     );
     if (result.ok && (!draftStatus || draftStatus.kind === "error"))
@@ -198,10 +227,48 @@ export function ProjectForm({
       document.getElementById("field-project-name")?.focus();
       return;
     }
-    if (onSave(fields.name.trim(), fields.description.trim())) {
+    const submitted = {
+      name: fields.name.trim(),
+      description: fields.description.trim(),
+    };
+    const result = onSave(submitted.name, submitted.description, base);
+    if (result.ok) {
       removeProjectFormDraft(draftTarget.projectId);
       onDraftChange();
       setDraftStatus(null);
+      setConflictMessage("");
+      return;
+    }
+    if (result.conflict && base) {
+      const reconciled = reconcileFields(base, submitted, result.conflict);
+      setBase(result.conflict);
+      setFields(reconciled.fields);
+      setConflictMessage(
+        describeConflict(
+          reconciled.remoteChangedKeys,
+          reconciled.conflictingKeys,
+          { name: "프로젝트 이름", description: "프로젝트 설명" },
+          "프로젝트",
+        ),
+      );
+      if (sameFields(reconciled.fields, result.conflict)) {
+        if (removeProjectFormDraft(draftTarget.projectId)) {
+          onDraftChange();
+          setDraftStatus(null);
+        }
+      } else {
+        const draft = saveProjectFormDraft(
+          draftTarget.projectId,
+          result.conflict,
+          reconciled.fields,
+        );
+        if (draft.ok) onDraftChange();
+        setDraftStatus(
+          draft.ok
+            ? { kind: "saved", savedAt: draft.savedAt }
+            : { kind: "error", message: draft.message },
+        );
+      }
     }
   }
   return (
@@ -224,6 +291,11 @@ export function ProjectForm({
         multiline
         hint="목적과 만들고 싶은 모습을 자유롭게 적어 주세요."
       />
+      {conflictMessage && (
+        <p className="form-conflict" role="alert" aria-live="assertive">
+          {conflictMessage}
+        </p>
+      )}
       {draftStatus && (
         <p
           className={`form-draft-status ${draftStatus.kind === "error" ? "field-error" : "muted"}`}
@@ -238,7 +310,11 @@ export function ProjectForm({
         </p>
       )}
       <FormActions onClose={onClose}>
-        {project ? "변경 저장" : "프로젝트 만들기"}
+        {conflictMessage
+          ? "확인 후 다시 저장"
+          : draftTarget.projectId
+            ? "변경 저장"
+            : "프로젝트 만들기"}
       </FormActions>
     </form>
   );
@@ -254,7 +330,10 @@ export function CardForm({
 }: {
   projectId: string;
   card?: Card;
-  onSave: (fields: CardFields) => boolean;
+  onSave: (
+    fields: CardFields,
+    base: CardFields | null,
+  ) => EntitySaveResult<CardFields>;
   onClose: () => void;
   onDirtyChange: UnsavedChangeHandler;
   onDraftChange: () => void;
@@ -280,6 +359,7 @@ export function CardForm({
       status: "todo",
     },
   );
+  const [base, setBase] = useState(draftTarget.base);
   const [restoredDraft] = useState(() =>
     loadCardFormDraft(
       projectId,
@@ -289,6 +369,7 @@ export function CardForm({
   );
   const [fields, setFields] = useState(restoredDraft?.fields ?? initial);
   const [error, setError] = useState("");
+  const [conflictMessage, setConflictMessage] = useState("");
   const [draftStatus, setDraftStatus] = useState<
     | { kind: "restored" | "saved"; savedAt: string }
     | { kind: "error"; message: string }
@@ -298,9 +379,8 @@ export function CardForm({
       ? { kind: "restored", savedAt: restoredDraft.savedAt }
       : null,
   );
-  const dirty = (Object.keys(initial) as (keyof CardFields)[]).some(
-    (key) => fields[key] !== initial[key],
-  );
+  const savedFields = base ?? initial;
+  const dirty = !sameFields(fields, savedFields);
   const discardDraft = useCallback(() => {
     if (removeCardFormDraft(projectId, draftTarget.cardId)) {
       onDraftChange();
@@ -319,10 +399,9 @@ export function CardForm({
     const next = { ...fields, [key]: value } as CardFields;
     setFields(next);
     if (key === "title") setError("");
-    const matchesSaved = (Object.keys(initial) as (keyof CardFields)[]).every(
-      (field) => next[field] === initial[field],
-    );
+    const matchesSaved = sameFields(next, savedFields);
     if (matchesSaved) {
+      setConflictMessage("");
       if (removeCardFormDraft(projectId, draftTarget.cardId)) {
         onDraftChange();
         setDraftStatus(null);
@@ -338,7 +417,7 @@ export function CardForm({
     const result = saveCardFormDraft(
       projectId,
       draftTarget.cardId,
-      draftTarget.base,
+      base,
       next,
     );
     if (result.ok && (!draftStatus || draftStatus.kind === "error"))
@@ -356,17 +435,58 @@ export function CardForm({
       document.getElementById("field-card-title")?.focus();
       return;
     }
-    const saved = onSave({
+    const submitted = {
       ...fields,
       title: fields.title.trim(),
       description: fields.description.trim(),
       requirements: fields.requirements.trim(),
       acceptance: fields.acceptance.trim(),
-    });
-    if (saved) {
+    };
+    const result = onSave(submitted, base);
+    if (result.ok) {
       removeCardFormDraft(projectId, draftTarget.cardId);
       onDraftChange();
       setDraftStatus(null);
+      setConflictMessage("");
+      return;
+    }
+    if (result.conflict && base) {
+      const reconciled = reconcileFields(base, submitted, result.conflict);
+      setBase(result.conflict);
+      setFields(reconciled.fields);
+      setConflictMessage(
+        describeConflict(
+          reconciled.remoteChangedKeys,
+          reconciled.conflictingKeys,
+          {
+            title: "작업 제목",
+            description: "작업 설명",
+            requirements: "요구사항",
+            acceptance: "완료 조건",
+            status: "작업 상태",
+          },
+          "작업 카드",
+        ),
+      );
+      if (sameFields(reconciled.fields, result.conflict)) {
+        if (removeCardFormDraft(projectId, draftTarget.cardId)) {
+          onDraftChange();
+          setDraftStatus(null);
+        }
+      } else {
+        const draft = saveCardFormDraft(
+          projectId,
+          draftTarget.cardId,
+          result.conflict,
+          reconciled.fields,
+        );
+        if (draft.ok) onDraftChange();
+        setDraftStatus(
+          draft.ok
+            ? { kind: "saved", savedAt: draft.savedAt }
+            : { kind: "error", message: draft.message },
+        );
+      }
     }
   }
   return (
@@ -421,6 +541,11 @@ export function CardForm({
         multiline
         hint="어떤 결과를 확인하면 완료인가요?"
       />
+      {conflictMessage && (
+        <p className="form-conflict" role="alert" aria-live="assertive">
+          {conflictMessage}
+        </p>
+      )}
       {draftStatus && (
         <p
           className={`form-draft-status ${draftStatus.kind === "error" ? "field-error" : "muted"}`}
@@ -435,7 +560,11 @@ export function CardForm({
         </p>
       )}
       <FormActions onClose={onClose}>
-        {card ? "변경 저장" : "카드 만들기"}
+        {conflictMessage
+          ? "확인 후 다시 저장"
+          : draftTarget.cardId
+            ? "변경 저장"
+            : "카드 만들기"}
       </FormActions>
     </form>
   );
@@ -461,15 +590,13 @@ export function CardDetail({
   card: Card;
   onEdit: () => void;
   onDelete: () => void;
-  onNoteSave: (
-    note: Pick<Card["note"], "done" | "blocked" | "next">,
-  ) => string | false;
+  onNoteSave: (note: NoteFields, base: Card["note"]) => NoteSaveResult;
   onPrompt: () => void;
   hasPromptDraft: boolean;
   onDirtyChange: UnsavedChangeHandler;
   onDraftChange: () => void;
 }) {
-  const [baseUpdatedAt, setBaseUpdatedAt] = useState(card.note.updatedAt);
+  const [baseNote, setBaseNote] = useState(card.note);
   const [restoredDraft] = useState(() =>
     loadProgressNoteDraft(card.id, card.note.updatedAt),
   );
@@ -480,6 +607,7 @@ export function CardDetail({
       next: card.note.next,
     },
   );
+  const [conflictMessage, setConflictMessage] = useState("");
   const [draftStatus, setDraftStatus] = useState<
     | { kind: "restored" | "saved"; savedAt: string }
     | { kind: "error"; message: string }
@@ -490,9 +618,9 @@ export function CardDetail({
       : null,
   );
   const dirty =
-    note.done !== card.note.done ||
-    note.blocked !== card.note.blocked ||
-    note.next !== card.note.next;
+    note.done !== baseNote.done ||
+    note.blocked !== baseNote.blocked ||
+    note.next !== baseNote.next;
   const discardDraft = useCallback(() => {
     if (removeProgressNoteDraft(card.id)) {
       onDraftChange();
@@ -511,10 +639,11 @@ export function CardDetail({
     const next = { ...note, [key]: value };
     setNote(next);
     const matchesSaved =
-      next.done === card.note.done &&
-      next.blocked === card.note.blocked &&
-      next.next === card.note.next;
+      next.done === baseNote.done &&
+      next.blocked === baseNote.blocked &&
+      next.next === baseNote.next;
     if (matchesSaved) {
+      setConflictMessage("");
       if (removeProgressNoteDraft(card.id)) {
         onDraftChange();
         setDraftStatus(null);
@@ -527,7 +656,7 @@ export function CardDetail({
       }
       return;
     }
-    const result = saveProgressNoteDraft(card.id, baseUpdatedAt, next);
+    const result = saveProgressNoteDraft(card.id, baseNote.updatedAt, next);
     if (result.ok && (!draftStatus || draftStatus.kind === "error"))
       onDraftChange();
     setDraftStatus(
@@ -572,12 +701,59 @@ export function CardDetail({
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          const savedAt = onNoteSave(note);
-          if (savedAt) {
-            setBaseUpdatedAt(savedAt);
+          const result = onNoteSave(note, baseNote);
+          if (result.ok) {
+            setBaseNote({ ...note, updatedAt: result.savedAt });
             removeProgressNoteDraft(card.id);
             onDraftChange();
             setDraftStatus(null);
+            setConflictMessage("");
+            return;
+          }
+          if (result.conflict) {
+            const remote = {
+              done: result.conflict.done,
+              blocked: result.conflict.blocked,
+              next: result.conflict.next,
+            };
+            const previous = {
+              done: baseNote.done,
+              blocked: baseNote.blocked,
+              next: baseNote.next,
+            };
+            const reconciled = reconcileFields(previous, note, remote);
+            setBaseNote(result.conflict);
+            setNote(reconciled.fields);
+            setConflictMessage(
+              describeConflict(
+                reconciled.remoteChangedKeys,
+                reconciled.conflictingKeys,
+                {
+                  done: "한 일",
+                  blocked: "막힌 점",
+                  next: "다음 할 일",
+                },
+                "진행 메모",
+              ),
+            );
+            if (sameFields(reconciled.fields, remote)) {
+              if (removeProgressNoteDraft(card.id)) {
+                onDraftChange();
+                setDraftStatus(null);
+              }
+            } else {
+              const draft = saveProgressNoteDraft(
+                card.id,
+                result.conflict.updatedAt,
+                reconciled.fields,
+              );
+              if (draft.ok) onDraftChange();
+              setDraftStatus(
+                draft.ok
+                  ? { kind: "saved", savedAt: draft.savedAt }
+                  : { kind: "error", message: draft.message },
+              );
+            }
           }
         }}
       >
@@ -602,6 +778,11 @@ export function CardDetail({
           onChange={(v) => updateNote("next", v)}
           multiline
         />
+        {conflictMessage && (
+          <p className="form-conflict" role="alert" aria-live="assertive">
+            {conflictMessage}
+          </p>
+        )}
         <div className="note-save">
           <p
             className={draftStatus?.kind === "error" ? "field-error" : "muted"}
@@ -621,7 +802,7 @@ export function CardDetail({
                       : "아직 저장한 메모가 없어요."}
           </p>
           <button className="button secondary" type="submit">
-            메모 저장
+            {conflictMessage ? "확인 후 다시 저장" : "메모 저장"}
           </button>
         </div>
       </form>

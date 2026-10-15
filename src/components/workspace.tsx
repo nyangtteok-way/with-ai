@@ -52,14 +52,19 @@ import {
   removeProjectCardFormDrafts,
   removeProjectPromptDrafts,
   removeProjectProgressNoteDrafts,
+  type ProjectDraftFields,
 } from "@/lib/drafts";
+import { sameFields } from "@/lib/conflicts";
 import {
   Badge,
   CardDetail,
-  CardFields,
   CardForm,
   ProjectForm,
   PromptEditor,
+  type CardFields,
+  type EntitySaveResult,
+  type NoteFields,
+  type NoteSaveResult,
 } from "./forms";
 import { Dialog } from "./dialog";
 type Modal =
@@ -213,12 +218,32 @@ export function Workspace() {
     setSearch("");
     setModal(null);
   }
-  function saveProject(name: string, description: string) {
+  function saveProject(
+    name: string,
+    description: string,
+    base: ProjectDraftFields | null,
+  ): EntitySaveResult<ProjectDraftFields> {
     const editingId = modal?.kind === "project" ? modal.projectId : undefined;
+    const existing = editingId
+      ? data.projects.find((item) => item.id === editingId)
+      : undefined;
+    if (editingId && !existing) {
+      notify("프로젝트가 삭제되었어요. 목록을 다시 확인해 주세요.", true);
+      return { ok: false };
+    }
+    if (existing) {
+      const current = {
+        name: existing.name,
+        description: existing.description,
+      };
+      if (!base || !sameFields(base, current)) {
+        return { ok: false, conflict: current };
+      }
+    }
     const stamp = now();
-    const next: Project = editingId
+    const next: Project = existing
       ? {
-          ...data.projects.find((p) => p.id === editingId)!,
+          ...existing,
           name,
           description,
           updatedAt: stamp,
@@ -231,10 +256,6 @@ export function Workspace() {
           createdAt: stamp,
           updatedAt: stamp,
         };
-    if (editingId && !data.projects.some((p) => p.id === editingId)) {
-      notify("프로젝트가 삭제되었어요. 목록을 다시 확인해 주세요.", true);
-      return false;
-    }
     if (
       persist(
         {
@@ -248,9 +269,9 @@ export function Workspace() {
     ) {
       if (editingId) removeProjectPromptDrafts(editingId);
       selectProject(next.id);
-      return true;
+      return { ok: true };
     }
-    return false;
+    return { ok: false };
   }
   function updateProject(next: Project, message: string) {
     return persist(
@@ -261,13 +282,28 @@ export function Workspace() {
       message,
     );
   }
-  function saveCard(fields: CardFields) {
-    if (!project) return false;
+  function saveCard(
+    fields: CardFields,
+    base: CardFields | null,
+  ): EntitySaveResult<CardFields> {
+    if (!project) return { ok: false };
     const id = modal?.kind === "card" ? modal.cardId : undefined;
     const existing = project.cards.find((c) => c.id === id);
     if (id && !existing) {
       notify("카드가 삭제되었어요. 목록을 다시 확인해 주세요.", true);
-      return false;
+      return { ok: false };
+    }
+    if (existing) {
+      const current: CardFields = {
+        title: existing.title,
+        description: existing.description,
+        requirements: existing.requirements,
+        acceptance: existing.acceptance,
+        status: existing.status,
+      };
+      if (!base || !sameFields(base, current)) {
+        return { ok: false, conflict: current };
+      }
     }
     const stamp = now();
     const card: Card = existing
@@ -293,12 +329,23 @@ export function Workspace() {
     ) {
       if (existing) removePromptDraft(project.id, card.id);
       setModal(existing ? { kind: "detail", cardId: card.id } : null);
-      return true;
+      return { ok: true };
     }
-    return false;
+    return { ok: false };
   }
-  function saveNote(note: Pick<Card["note"], "done" | "blocked" | "next">) {
-    if (!project || !selectedCard) return false;
+  function saveNote(
+    note: NoteFields,
+    base: Card["note"],
+  ): NoteSaveResult {
+    if (!project || !selectedCard) return { ok: false };
+    const existing = project.cards.find((card) => card.id === selectedCard.id);
+    if (!existing) {
+      notify("카드가 삭제되었어요. 목록을 다시 확인해 주세요.", true);
+      return { ok: false };
+    }
+    if (!sameFields(base, existing.note)) {
+      return { ok: false, conflict: existing.note };
+    }
     const stamp = now();
     const saved = updateProject(
       {
@@ -312,9 +359,9 @@ export function Workspace() {
       },
       "진행 메모를 저장했어요.",
     );
-    if (!saved) return false;
+    if (!saved) return { ok: false };
     removePromptDraft(project.id, selectedCard.id);
-    return stamp;
+    return { ok: true, savedAt: stamp };
   }
   function removeProject(id: string) {
     if (
