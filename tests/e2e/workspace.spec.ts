@@ -192,6 +192,133 @@ test("모바일 CRUD, 메모, 필터, 집계, 지속 저장, 요청문, 백업 �
     page.getByRole("button", { name: "첫 프로젝트 만들기", exact: true }),
   ).toBeVisible();
 });
+test("백업 교체 전 데이터를 자동 보관하고 설정에서 복구한다", async ({
+  page,
+}) => {
+  await newProject(page);
+  await newCard(page, "보존할 작업", "doing");
+  const beforeImport = await page.evaluate(() =>
+    localStorage.getItem("with-ai:data:v1"),
+  );
+  expect(beforeImport).toBeTruthy();
+
+  const imported = {
+    version: 1,
+    projects: [
+      {
+        id: "imported-project",
+        name: "가져온 프로젝트",
+        description: "교체 확인",
+        createdAt: "2026-10-17T00:00:00.000Z",
+        updatedAt: "2026-10-17T00:00:00.000Z",
+        cards: [
+          {
+            id: "imported-card",
+            title: "가져온 작업",
+            description: "",
+            requirements: "",
+            acceptance: "",
+            status: "todo",
+            createdAt: "2026-10-17T00:00:00.000Z",
+            updatedAt: "2026-10-17T00:00:00.000Z",
+            note: { done: "", blocked: "", next: "", updatedAt: null },
+          },
+        ],
+      },
+    ],
+  };
+  const importFile = {
+    name: "replace.json",
+    mimeType: "application/json",
+    buffer: Buffer.from(JSON.stringify(imported)),
+  };
+
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  await page
+    .getByLabel("JSON 백업 파일", { exact: true })
+    .setInputFiles(importFile);
+  await expect(page.getByRole("dialog")).toContainText("자동 보관");
+  await page.getByRole("button", { name: "데이터 교체", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "가져온 프로젝트" }),
+  ).toBeVisible();
+  const recovery = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem("with-ai:import-recovery:v1")!),
+  );
+  expect(recovery.data).toEqual(JSON.parse(beforeImport!));
+
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  const recoveryPanel = page.locator(".import-recovery");
+  await expect(recoveryPanel.getByText("교체 전 데이터 보관 중")).toBeVisible();
+  await expect(
+    recoveryPanel.getByText(/프로젝트 1개 · 작업 카드 1개/),
+  ).toBeVisible();
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    expect(
+      await page
+        .getByRole("dialog")
+        .evaluate((element) => element.scrollWidth <= element.clientWidth),
+    ).toBe(true);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+  }
+  await page
+    .getByRole("button", { name: "교체 전 데이터 복구", exact: true })
+    .click();
+  const restoreDialog = page.getByRole("dialog", {
+    name: "교체 전 데이터로 복구할까요?",
+  });
+  await expect(restoreDialog).toContainText("현재 프로젝트 1개");
+  await expect(
+    page.getByRole("heading", { level: 1, name: "가져온 프로젝트" }),
+  ).toBeVisible();
+  await restoreDialog
+    .getByRole("button", { name: "교체 전 데이터 복구", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "모바일 실험" }),
+  ).toBeVisible();
+  await expect(page.locator(".task-card")).toContainText("보존할 작업");
+  expect(
+    await page.evaluate(() =>
+      localStorage.getItem("with-ai:import-recovery:v1"),
+    ),
+  ).toBeNull();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "모바일 실험" }),
+  ).toBeVisible();
+
+  const beforeBlockedImport = await page.evaluate(() =>
+    localStorage.getItem("with-ai:data:v1"),
+  );
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  await page
+    .getByLabel("JSON 백업 파일", { exact: true })
+    .setInputFiles(importFile);
+  await page.evaluate(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === "with-ai:import-recovery:v1")
+        throw new DOMException("full", "QuotaExceededError");
+      return original.call(this, key, value);
+    };
+  });
+  await page.getByRole("button", { name: "데이터 교체", exact: true }).click();
+  await expect(page.getByRole("alert", { name: "작업 알림" })).toContainText(
+    "가져오기를 중단했어요",
+  );
+  expect(
+    await page.evaluate(() => localStorage.getItem("with-ai:data:v1")),
+  ).toBe(beforeBlockedImport);
+  await expect(
+    page.getByRole("heading", { level: 1, name: "모바일 실험" }),
+  ).toBeVisible();
+});
 test("입력 오류, 잘못된 백업, 복사 실패 및 직접 선택", async ({ page }) => {
   await newProject(page);
   await page

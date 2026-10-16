@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowDownToLine,
@@ -14,6 +14,7 @@ import {
   Layers3,
   MoreHorizontal,
   Plus,
+  RotateCcw,
   Search,
   Settings2,
   ShieldCheck,
@@ -36,6 +37,13 @@ import {
   summarize,
 } from "@/lib/model";
 import { retryLoad, saveData, useAppStore } from "@/lib/store";
+import {
+  IMPORT_RECOVERY_KEY,
+  loadImportRecovery,
+  removeImportRecovery,
+  saveImportRecovery,
+  type ImportRecovery,
+} from "@/lib/import-recovery";
 import {
   hasCardFormDraft,
   hasPromptDraft,
@@ -77,6 +85,7 @@ type Modal =
   | { kind: "delete-project"; projectId: string }
   | { kind: "delete-card"; cardId: string }
   | { kind: "import"; data: AppData; filename: string }
+  | { kind: "restore-import"; recovery: ImportRecovery }
   | null;
 function download(text: string, filename: string) {
   const url = URL.createObjectURL(
@@ -101,8 +110,20 @@ export function Workspace() {
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(
     null,
   );
+  const [importRecovery, setImportRecovery] =
+    useState<ImportRecovery | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!ready) return;
+    const refresh = () => setImportRecovery(loadImportRecovery());
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === IMPORT_RECOVERY_KEY || event.key === null) refresh();
+    };
+    refresh();
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [ready]);
   const project =
     data.projects.find((p) => p.id === activeId) ?? data.projects[0];
   const draftIndicators = useMemo(
@@ -417,6 +438,16 @@ export function Workspace() {
       `with-ai-backup-${new Date().toISOString().slice(0, 10)}.json`,
     );
     notify("JSON 백업 파일을 내보냈어요.");
+  }
+  function resetAfterDataReplacement() {
+    removeAllProgressNoteDrafts();
+    removeAllCardFormDrafts();
+    removeAllPromptDrafts();
+    removeAllProjectFormDrafts();
+    setActiveId(null);
+    setFilter("all");
+    setSearch("");
+    setModal(null);
   }
   const notification = toast && (
     <div
@@ -1081,6 +1112,39 @@ export function Workspace() {
               <ChevronRight size={18} />
             </button>
           </div>
+          {importRecovery && (
+            <div className="import-recovery">
+              <div className="import-recovery-heading">
+                <span className="backup-icon">
+                  <RotateCcw size={22} />
+                </span>
+                <div>
+                  <strong>교체 전 데이터 보관 중</strong>
+                  <p>
+                    {formatDate(importRecovery.savedAt)} · 프로젝트{" "}
+                    {importRecovery.data.projects.length}개 · 작업 카드{" "}
+                    {importRecovery.data.projects.reduce(
+                      (count, item) => count + item.cards.length,
+                      0,
+                    )}
+                    개
+                  </p>
+                </div>
+              </div>
+              <button
+                className="button secondary"
+                onClick={() =>
+                  setModal({ kind: "restore-import", recovery: importRecovery })
+                }
+              >
+                교체 전 데이터 복구
+              </button>
+              <small>
+                최근 JSON 가져오기 직전의 확정 데이터 1개만 이 브라우저에
+                보관해요. 저장하지 않은 초안은 포함하지 않아요.
+              </small>
+            </div>
+          )}
           <div className="settings-footnote">
             <p>
               이 기기에 프로젝트 {data.projects.length}개 · 작업 카드{" "}
@@ -1109,7 +1173,9 @@ export function Workspace() {
           </p>
           <div className="import-warning">
             기존 프로젝트 {data.projects.length}개와 모든 카드·메모를 교체해요.
-            현재 데이터는 먼저 내보내 두는 것을 권장해요.
+            현재 확정 데이터는 교체 직전에 이 브라우저에 자동 보관하며, 보관에
+            실패하면 교체하지 않아요. 저장하지 않은 초안은 정리되므로 필요한
+            내용은 먼저 저장해 주세요.
           </div>
           <div className="form-actions">
             <button
@@ -1121,19 +1187,76 @@ export function Workspace() {
             <button
               className="button primary"
               onClick={() => {
+                if (!error) {
+                  const result = saveImportRecovery(data);
+                  if (!result.ok) {
+                    notify(result.message, true);
+                    return;
+                  }
+                  setImportRecovery(result.recovery);
+                }
                 if (persist(modal.data, "백업 데이터를 가져왔어요.", true)) {
-                  removeAllProgressNoteDrafts();
-                  removeAllCardFormDrafts();
-                  removeAllPromptDrafts();
-                  removeAllProjectFormDrafts();
-                  setActiveId(null);
-                  setFilter("all");
-                  setSearch("");
-                  setModal(null);
+                  resetAfterDataReplacement();
                 }
               }}
             >
               데이터 교체
+            </button>
+          </div>
+        </Dialog>
+      )}
+      {modal?.kind === "restore-import" && (
+        <Dialog
+          notice={notification}
+          title="교체 전 데이터로 복구할까요?"
+          onClose={() => setModal({ kind: "settings" })}
+        >
+          <p className="confirm-copy">
+            <strong>
+              {formatDate(modal.recovery.savedAt)}에 보관한 데이터
+            </strong>
+            <br />
+            프로젝트 {modal.recovery.data.projects.length}개 · 작업 카드{" "}
+            {modal.recovery.data.projects.reduce(
+              (count, item) => count + item.cards.length,
+              0,
+            )}
+            개를 복구해요.
+          </p>
+          <div className="import-warning">
+            현재 프로젝트 {data.projects.length}개와 모든 카드·메모를 교체하고
+            저장하지 않은 초안을 정리해요. 현재 데이터도 필요하면 먼저 JSON으로
+            내보내 주세요.
+          </div>
+          <div className="form-actions">
+            <button
+              className="button secondary"
+              onClick={() => setModal({ kind: "settings" })}
+            >
+              취소
+            </button>
+            <button
+              className="button primary"
+              onClick={() => {
+                if (
+                  persist(
+                    modal.recovery.data,
+                    "교체 전 데이터를 복구했어요.",
+                    true,
+                  )
+                ) {
+                  const removed = removeImportRecovery();
+                  setImportRecovery(removed ? null : loadImportRecovery());
+                  resetAfterDataReplacement();
+                  if (!removed)
+                    notify(
+                      "데이터는 복구했지만 보관 항목은 삭제하지 못했어요.",
+                      true,
+                    );
+                }
+              }}
+            >
+              교체 전 데이터 복구
             </button>
           </div>
         </Dialog>
