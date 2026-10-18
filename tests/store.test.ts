@@ -1,0 +1,186 @@
+import { strict as assert } from "node:assert";
+import { test, type TestContext } from "node:test";
+import { STORAGE_KEY, retryLoad, saveData } from "../src/lib/store";
+import {
+  IMPORT_RECOVERY_KEY,
+  createImportRecovery,
+  loadImportRecovery,
+  serializeStoredData,
+} from "../src/lib/import-recovery";
+import { parseBackup, type AppData } from "../src/lib/model";
+
+function projectData(name: string): AppData {
+  return {
+    version: 1,
+    projects: [
+      {
+        id: name,
+        name,
+        description: "",
+        createdAt: "2026-10-18T00:00:00.000Z",
+        updatedAt: "2026-10-18T00:00:00.000Z",
+        cards: [],
+      },
+    ],
+  };
+}
+const previous = projectData("이전 복구 데이터");
+const current = projectData("현재 데이터");
+const next = projectData("가져올 데이터");
+const recovery = createImportRecovery(previous, "2026-10-17T00:00:00.000Z");
+const legacyRaw = JSON.stringify({ version: 1, ...recovery });
+
+function setup(t: TestContext, raw = JSON.stringify(current)) {
+  const values = new Map([
+    [STORAGE_KEY, raw],
+    [IMPORT_RECOVERY_KEY, legacyRaw],
+  ]);
+  const controls = { failWrite: "", failRead: false, failRemove: false };
+  const storage = {
+    getItem(key: string) {
+      if (controls.failRead) throw new DOMException("denied", "SecurityError");
+      return values.get(key) ?? null;
+    },
+    setItem(key: string, value: string) {
+      if (controls.failWrite)
+        throw new DOMException("blocked", controls.failWrite);
+      values.set(key, value);
+    },
+    removeItem(key: string) {
+      if (controls.failRemove)
+        throw new DOMException("denied", "SecurityError");
+      values.delete(key);
+    },
+  };
+  const descriptor = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "localStorage",
+  );
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: storage,
+  });
+  t.after(() => {
+    if (descriptor)
+      Object.defineProperty(globalThis, "localStorage", descriptor);
+    else Reflect.deleteProperty(globalThis, "localStorage");
+  });
+  retryLoad();
+  return { storage, values, controls };
+}
+
+test("가져오기 실패는 기존 본문과 이전 복구본을 바꾸지 않으며 재시도는 함께 저장한다", (t) => {
+  const { storage, controls } = setup(t);
+  for (const error of ["QuotaExceededError", "SecurityError"]) {
+    controls.failWrite = error;
+    const result = saveData(next, { kind: "import" });
+    assert.equal(result.ok, false);
+    assert.match(result.ok ? "" : result.message, /이전 복구본은 유지/);
+    assert.equal(storage.getItem(STORAGE_KEY), JSON.stringify(current));
+    assert.equal(storage.getItem(IMPORT_RECOVERY_KEY), legacyRaw);
+    retryLoad();
+    assert.deepEqual(
+      loadImportRecovery(storage.getItem(STORAGE_KEY), storage),
+      recovery,
+    );
+  }
+  controls.failWrite = "";
+  assert.equal(saveData(next, { kind: "import" }).ok, true);
+  const raw = storage.getItem(STORAGE_KEY)!;
+  assert.deepEqual(parseBackup(raw), next);
+  assert.deepEqual(loadImportRecovery(raw, storage)?.data, current);
+  assert.equal(storage.getItem(IMPORT_RECOVERY_KEY), null);
+});
+
+test("새 저장 형식에서도 일반 편집과 실패한 가져오기·복구가 복구본을 유지한다", (t) => {
+  const { storage, controls } = setup(
+    t,
+    serializeStoredData(current, recovery),
+  );
+  assert.equal(saveData(next).ok, true);
+  const before = storage.getItem(STORAGE_KEY)!;
+  assert.deepEqual(loadImportRecovery(before, storage), recovery);
+  controls.failWrite = "QuotaExceededError";
+  assert.equal(saveData(current, { kind: "import" }).ok, false);
+  assert.equal(saveData(previous, { kind: "restore", recovery }).ok, false);
+  assert.equal(storage.getItem(STORAGE_KEY), before);
+  controls.failWrite = "";
+  assert.equal(saveData(previous, { kind: "restore", recovery }).ok, true);
+  retryLoad();
+  assert.deepEqual(parseBackup(storage.getItem(STORAGE_KEY)!), previous);
+  assert.equal(loadImportRecovery(storage.getItem(STORAGE_KEY), storage), null);
+});
+
+test("아직 읽지 않은 다른 탭 변경은 복구본을 만들기 전에 가져오기를 중단한다", (t) => {
+  const { storage } = setup(t);
+  const changed = serializeStoredData(projectData("다른 탭 변경"), recovery);
+  storage.setItem(STORAGE_KEY, changed);
+  const result = saveData(next, { kind: "import" });
+  assert.equal(result.ok, false);
+  assert.match(result.ok ? "" : result.message, /다른 탭/);
+  assert.equal(storage.getItem(STORAGE_KEY), changed);
+  assert.equal(storage.getItem(IMPORT_RECOVERY_KEY), legacyRaw);
+});
+
+test("확인 중 복구 지점이 바뀌면 오래된 복구 확인으로 덮어쓰지 않는다", (t) => {
+  const { storage } = setup(t);
+  const latest = createImportRecovery(next);
+  storage.setItem(
+    IMPORT_RECOVERY_KEY,
+    JSON.stringify({ version: 1, ...latest }),
+  );
+  const result = saveData(previous, { kind: "restore", recovery });
+  assert.equal(result.ok, false);
+  assert.match(result.ok ? "" : result.message, /복구 지점이 바뀌었어요/);
+  assert.deepEqual(parseBackup(storage.getItem(STORAGE_KEY)!), current);
+  assert.deepEqual(
+    loadImportRecovery(storage.getItem(STORAGE_KEY), storage),
+    latest,
+  );
+});
+
+test("기존 복구본 정리가 실패해도 복구 성공 후 오래된 복구본이 되살아나지 않는다", (t) => {
+  const { storage, controls } = setup(t);
+  controls.failRemove = true;
+  assert.equal(saveData(next).ok, true);
+  assert.deepEqual(
+    loadImportRecovery(storage.getItem(STORAGE_KEY), storage),
+    recovery,
+  );
+  assert.equal(saveData(previous, { kind: "restore", recovery }).ok, true);
+  assert.equal(storage.getItem(IMPORT_RECOVERY_KEY), legacyRaw);
+  retryLoad();
+  assert.equal(loadImportRecovery(storage.getItem(STORAGE_KEY), storage), null);
+  assert.equal(saveData(current).ok, true);
+  assert.equal(loadImportRecovery(storage.getItem(STORAGE_KEY), storage), null);
+});
+
+test("손상된 본문을 백업으로 복구할 때 기존 복구본을 빈 데이터로 덮지 않는다", (t) => {
+  const { storage } = setup(t, "broken-json");
+  assert.equal(saveData(next).ok, false);
+  assert.equal(storage.getItem(STORAGE_KEY), "broken-json");
+  assert.equal(saveData(next, { kind: "import" }).ok, true);
+  assert.deepEqual(parseBackup(storage.getItem(STORAGE_KEY)!), next);
+  assert.deepEqual(
+    loadImportRecovery(storage.getItem(STORAGE_KEY), storage),
+    recovery,
+  );
+});
+
+test("저장소 읽기 실패 시 기존 데이터와 복구본은 변경하지 않는다", (t) => {
+  const { values, controls } = setup(t);
+  controls.failRead = true;
+  assert.equal(saveData(next, { kind: "import" }).ok, false);
+  assert.equal(values.get(STORAGE_KEY), JSON.stringify(current));
+  assert.equal(values.get(IMPORT_RECOVERY_KEY), legacyRaw);
+});
+
+test("복구본이 없던 첫 가져오기도 실패하면 가짜 복구 지점을 만들지 않는다", (t) => {
+  const { storage, controls } = setup(t);
+  storage.removeItem(IMPORT_RECOVERY_KEY);
+  retryLoad();
+  controls.failWrite = "QuotaExceededError";
+  assert.equal(saveData(next, { kind: "import" }).ok, false);
+  assert.equal(loadImportRecovery(storage.getItem(STORAGE_KEY), storage), null);
+  assert.equal(storage.getItem(STORAGE_KEY), JSON.stringify(current));
+});

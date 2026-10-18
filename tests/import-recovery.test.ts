@@ -2,11 +2,12 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
   IMPORT_RECOVERY_KEY,
+  createImportRecovery,
   loadImportRecovery,
-  removeImportRecovery,
-  saveImportRecovery,
+  removeLegacyImportRecovery,
+  serializeStoredData,
 } from "../src/lib/import-recovery";
-import type { AppData } from "../src/lib/model";
+import { parseBackup, type AppData } from "../src/lib/model";
 
 function memoryStorage() {
   const values = new Map<string, string>();
@@ -43,20 +44,46 @@ const data: AppData = {
           status: "doing",
           createdAt: stamp,
           updatedAt: stamp,
-          note: { done: "기존 데이터", blocked: "", next: "복구", updatedAt: stamp },
+          note: {
+            done: "기존 데이터",
+            blocked: "",
+            next: "복구",
+            updatedAt: stamp,
+          },
         },
       ],
     },
   ],
 };
 
-test("가져오기 전 데이터를 저장하고 검증해 다시 불러온다", () => {
+test("복구본과 현재 데이터를 함께 직렬화하고 v1 백업에는 내부 복구본을 포함하지 않는다", () => {
+  const recovery = createImportRecovery(data, stamp);
+  const raw = serializeStoredData({ version: 1, projects: [] }, recovery);
+  assert.deepEqual(loadImportRecovery(raw), { savedAt: stamp, data });
+  assert.deepEqual(parseBackup(raw), { version: 1, projects: [] });
+  assert.deepEqual(
+    createImportRecovery(
+      JSON.parse(serializeStoredData(data, recovery)),
+      stamp,
+    ),
+    { savedAt: stamp, data },
+  );
+});
+
+test("이전 별도 키의 복구본은 기존 데이터 및 손상 데이터에서도 읽을 수 있다", () => {
   const storage = memoryStorage();
-  const saved = saveImportRecovery(data, storage, stamp);
-  assert.equal(saved.ok, true);
-  assert.deepEqual(loadImportRecovery(storage), { savedAt: stamp, data });
-  assert.equal(removeImportRecovery(storage), true);
-  assert.equal(loadImportRecovery(storage), null);
+  storage.setItem(
+    IMPORT_RECOVERY_KEY,
+    JSON.stringify({ version: 1, savedAt: stamp, data }),
+  );
+  for (const raw of [null, JSON.stringify(data), "broken-json"]) {
+    assert.deepEqual(loadImportRecovery(raw, storage), {
+      savedAt: stamp,
+      data,
+    });
+  }
+  assert.equal(removeLegacyImportRecovery(storage), true);
+  assert.equal(loadImportRecovery(null, storage), null);
 });
 
 test("손상되거나 지원하지 않는 복구 지점은 사용하지 않는다", () => {
@@ -69,21 +96,51 @@ test("손상되거나 지원하지 않는 복구 지점은 사용하지 않는�
     JSON.stringify({ version: 1, savedAt: stamp, data: { version: 2 } }),
   ]) {
     storage.setItem(IMPORT_RECOVERY_KEY, value);
-    assert.equal(loadImportRecovery(storage), null);
+    assert.equal(loadImportRecovery(null, storage), null);
+    assert.equal(
+      loadImportRecovery(
+        JSON.stringify({
+          ...data,
+          importRecovery: value === "not-json" ? value : JSON.parse(value),
+        }),
+        storage,
+      ),
+      null,
+    );
   }
+  storage.setItem(
+    IMPORT_RECOVERY_KEY,
+    JSON.stringify({ version: 1, savedAt: stamp, data }),
+  );
+  assert.equal(
+    loadImportRecovery(serializeStoredData(data, null), storage),
+    null,
+  );
+  assert.equal(
+    loadImportRecovery(
+      JSON.stringify({ ...data, importRecovery: {} }),
+      storage,
+    ),
+    null,
+  );
 });
 
-test("복구 지점을 저장할 수 없으면 실패를 알리고 가져오기 근거를 만들지 않는다", () => {
-  const storage = memoryStorage();
+test("잘못된 복구본 생성은 거절하고 저장소 읽기·정리 오류는 처리한다", () => {
+  assert.throws(() => createImportRecovery(data, "invalid"));
+  assert.throws(() =>
+    createImportRecovery({ version: 2 } as unknown as AppData),
+  );
   const blocked = {
-    getItem: storage.getItem.bind(storage),
-    removeItem: storage.removeItem.bind(storage),
+    getItem() {
+      throw new DOMException("denied", "SecurityError");
+    },
+    removeItem() {
+      throw new DOMException("denied", "SecurityError");
+    },
     setItem() {
-      throw new DOMException("full", "QuotaExceededError");
+      throw new DOMException("denied", "SecurityError");
     },
   };
-  const result = saveImportRecovery(data, blocked, stamp);
-  assert.equal(result.ok, false);
-  assert.match(result.ok ? "" : result.message, /가져오기를 중단/);
-  assert.equal(loadImportRecovery(storage), null);
+  assert.equal(loadImportRecovery(null, blocked), null);
+  assert.equal(removeLegacyImportRecovery(blocked), false);
 });

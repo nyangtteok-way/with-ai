@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowDownToLine,
@@ -36,14 +36,13 @@ import {
   parseBackup,
   summarize,
 } from "@/lib/model";
-import { retryLoad, saveData, useAppStore } from "@/lib/store";
 import {
-  IMPORT_RECOVERY_KEY,
-  loadImportRecovery,
-  removeImportRecovery,
-  saveImportRecovery,
-  type ImportRecovery,
-} from "@/lib/import-recovery";
+  retryLoad,
+  saveData,
+  useAppStore,
+  type SaveOptions,
+} from "@/lib/store";
+import type { ImportRecovery } from "@/lib/import-recovery";
 import {
   hasCardFormDraft,
   hasPromptDraft,
@@ -98,7 +97,7 @@ function download(text: string, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 export function Workspace() {
-  const { data, ready, error } = useAppStore();
+  const { data, ready, error, importRecovery } = useAppStore();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [filter, setFilter] = useState<Status | "all">("all");
   const [search, setSearch] = useState("");
@@ -110,20 +109,8 @@ export function Workspace() {
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(
     null,
   );
-  const [importRecovery, setImportRecovery] =
-    useState<ImportRecovery | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (!ready) return;
-    const refresh = () => setImportRecovery(loadImportRecovery());
-    const onStorage = (event: StorageEvent) => {
-      if (event.key === IMPORT_RECOVERY_KEY || event.key === null) refresh();
-    };
-    refresh();
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, [ready]);
   const project =
     data.projects.find((p) => p.id === activeId) ?? data.projects[0];
   const draftIndicators = useMemo(
@@ -224,8 +211,8 @@ export function Workspace() {
   function notify(text: string, error = false) {
     setToast({ text, error });
   }
-  function persist(next: AppData, message: string, recovering = false) {
-    const result = saveData(next, recovering);
+  function persist(next: AppData, message: string, options: SaveOptions = {}) {
+    const result = saveData(next, options);
     if (!result.ok) {
       notify(result.message, true);
       return false;
@@ -1173,9 +1160,11 @@ export function Workspace() {
           </p>
           <div className="import-warning">
             기존 프로젝트 {data.projects.length}개와 모든 카드·메모를 교체해요.
-            현재 확정 데이터는 교체 직전에 이 브라우저에 자동 보관하며, 보관에
-            실패하면 교체하지 않아요. 저장하지 않은 초안은 정리되므로 필요한
-            내용은 먼저 저장해 주세요.
+            {error
+              ? " 읽을 수 없는 현재 데이터는 자동 보관하지 못하지만, 남아 있는 정상 복구본은 유지해요."
+              : " 현재 확정 데이터는 교체 시 이 브라우저에 자동 보관해요."}
+            {" "}교체에 실패하면 현재 데이터와 이전 복구본을 모두 유지해요.
+            저장하지 않은 초안은 정리되므로 필요한 내용은 먼저 저장해 주세요.
           </div>
           <div className="form-actions">
             <button
@@ -1187,15 +1176,11 @@ export function Workspace() {
             <button
               className="button primary"
               onClick={() => {
-                if (!error) {
-                  const result = saveImportRecovery(data);
-                  if (!result.ok) {
-                    notify(result.message, true);
-                    return;
-                  }
-                  setImportRecovery(result.recovery);
-                }
-                if (persist(modal.data, "백업 데이터를 가져왔어요.", true)) {
+                if (
+                  persist(modal.data, "백업 데이터를 가져왔어요.", {
+                    kind: "import",
+                  })
+                ) {
                   resetAfterDataReplacement();
                 }
               }}
@@ -1242,17 +1227,10 @@ export function Workspace() {
                   persist(
                     modal.recovery.data,
                     "교체 전 데이터를 복구했어요.",
-                    true,
+                    { kind: "restore", recovery: modal.recovery },
                   )
                 ) {
-                  const removed = removeImportRecovery();
-                  setImportRecovery(removed ? null : loadImportRecovery());
                   resetAfterDataReplacement();
-                  if (!removed)
-                    notify(
-                      "데이터는 복구했지만 보관 항목은 삭제하지 못했어요.",
-                      true,
-                    );
                 }
               }}
             >

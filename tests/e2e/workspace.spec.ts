@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { parseBackup } from "../../src/lib/model";
 async function newProject(page: Page) {
   await page.goto("/");
   await page
@@ -243,9 +244,9 @@ test("백업 교체 전 데이터를 자동 보관하고 설정에서 복구한�
     page.getByRole("heading", { level: 1, name: "가져온 프로젝트" }),
   ).toBeVisible();
   const recovery = await page.evaluate(() =>
-    JSON.parse(localStorage.getItem("with-ai:import-recovery:v1")!),
+    JSON.parse(localStorage.getItem("with-ai:data:v1")!).importRecovery,
   );
-  expect(recovery.data).toEqual(JSON.parse(beforeImport!));
+  expect(recovery.data).toEqual(parseBackup(beforeImport!));
 
   await page.getByRole("button", { name: "설정", exact: true }).click();
   const recoveryPanel = page.locator(".import-recovery");
@@ -288,6 +289,9 @@ test("백업 교체 전 데이터를 자동 보관하고 설정에서 복구한�
       localStorage.getItem("with-ai:import-recovery:v1"),
     ),
   ).toBeNull();
+  expect(
+    await page.evaluate(() => JSON.parse(localStorage.getItem("with-ai:data:v1")!).importRecovery),
+  ).toBeNull();
   await page.reload();
   await expect(
     page.getByRole("heading", { level: 1, name: "모바일 실험" }),
@@ -303,7 +307,7 @@ test("백업 교체 전 데이터를 자동 보관하고 설정에서 복구한�
   await page.evaluate(() => {
     const original = Storage.prototype.setItem;
     Storage.prototype.setItem = function (key, value) {
-      if (key === "with-ai:import-recovery:v1")
+      if (key === "with-ai:data:v1")
         throw new DOMException("full", "QuotaExceededError");
       return original.call(this, key, value);
     };

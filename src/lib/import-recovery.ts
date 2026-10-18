@@ -2,7 +2,7 @@ import { parseBackup, type AppData } from "./model";
 
 export const IMPORT_RECOVERY_KEY = "with-ai:import-recovery:v1";
 
-type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+type StorageLike = Pick<Storage, "getItem" | "removeItem">;
 
 interface StoredImportRecovery {
   version: 1;
@@ -11,10 +11,6 @@ interface StoredImportRecovery {
 }
 
 export type ImportRecovery = Pick<StoredImportRecovery, "savedAt" | "data">;
-
-type SaveImportRecoveryResult =
-  | { ok: true; recovery: ImportRecovery }
-  | { ok: false; message: string };
 
 function getStorage(storage?: StorageLike): StorageLike {
   return storage ?? globalThis.localStorage;
@@ -32,18 +28,9 @@ function isIsoDate(value: unknown): value is string {
   );
 }
 
-export function loadImportRecovery(
-  storage?: StorageLike,
-): ImportRecovery | null {
+function parseRecovery(value: unknown): ImportRecovery | null {
   try {
-    const raw = getStorage(storage).getItem(IMPORT_RECOVERY_KEY);
-    if (raw === null) return null;
-    const value: unknown = JSON.parse(raw);
-    if (
-      !isRecord(value) ||
-      value.version !== 1 ||
-      !isIsoDate(value.savedAt)
-    )
+    if (!isRecord(value) || value.version !== 1 || !isIsoDate(value.savedAt))
       return null;
 
     return {
@@ -55,30 +42,48 @@ export function loadImportRecovery(
   }
 }
 
-export function saveImportRecovery(
-  data: AppData,
+export function loadImportRecovery(
+  rawData: string | null,
   storage?: StorageLike,
-  savedAt = new Date().toISOString(),
-): SaveImportRecoveryResult {
+): ImportRecovery | null {
+  // An explicit null prevents an old, separately stored recovery from returning
+  // after a restore, even if removing that legacy key was denied.
   try {
-    if (!isIsoDate(savedAt)) throw new Error("invalid recovery date");
-    const recovery: ImportRecovery = {
-      savedAt,
-      data: parseBackup(JSON.stringify(data)),
-    };
-    const stored: StoredImportRecovery = { version: 1, ...recovery };
-    getStorage(storage).setItem(IMPORT_RECOVERY_KEY, JSON.stringify(stored));
-    return { ok: true, recovery };
+    const value: unknown = rawData === null ? null : JSON.parse(rawData);
+    if (isRecord(value) && Object.hasOwn(value, "importRecovery"))
+      return parseRecovery(value.importRecovery);
   } catch {
-    return {
-      ok: false,
-      message:
-        "현재 데이터를 안전하게 보관하지 못해 가져오기를 중단했어요. 브라우저 저장 공간이나 권한을 확인하거나 JSON으로 먼저 내보내 주세요.",
-    };
+    // A legacy recovery may still help when the main data is damaged.
+  }
+  try {
+    const raw = getStorage(storage).getItem(IMPORT_RECOVERY_KEY);
+    return raw === null ? null : parseRecovery(JSON.parse(raw));
+  } catch {
+    return null;
   }
 }
 
-export function removeImportRecovery(storage?: StorageLike) {
+export function createImportRecovery(
+  data: AppData,
+  savedAt = new Date().toISOString(),
+): ImportRecovery {
+  if (!isIsoDate(savedAt)) throw new Error("invalid recovery date");
+  return { savedAt, data: parseBackup(JSON.stringify(data)) };
+}
+
+export function serializeStoredData(
+  data: AppData,
+  recovery: ImportRecovery | null,
+) {
+  const importRecovery: StoredImportRecovery | null = recovery
+    ? { version: 1, ...recovery }
+    : null;
+  // Keep the v1 project schema; this local-only field is excluded by parseBackup
+  // and therefore never appears in exported JSON or nests in a new recovery.
+  return JSON.stringify({ ...data, importRecovery });
+}
+
+export function removeLegacyImportRecovery(storage?: StorageLike) {
   try {
     getStorage(storage).removeItem(IMPORT_RECOVERY_KEY);
     return true;
