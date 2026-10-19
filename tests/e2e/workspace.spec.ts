@@ -135,7 +135,7 @@ test("모바일 CRUD, 메모, 필터, 집계, 지속 저장, 요청문, 백업 �
   await page.getByRole("button", { name: "설정", exact: true }).click();
   const [download] = await Promise.all([
     page.waitForEvent("download"),
-    page.getByRole("button", { name: "JSON 내보내기", exact: false }).click(),
+    page.getByRole("button", { name: /^JSON 내보내기/ }).click(),
   ]);
   const downloadPath = await download.path();
   expect(downloadPath).toBeTruthy();

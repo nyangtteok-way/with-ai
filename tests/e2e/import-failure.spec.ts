@@ -145,7 +145,7 @@ test("연속 가져오기 실패·재시도와 복구 실패에서 확정 데이
   );
   await page.getByRole("button", { name: "설정", exact: true }).click();
   const downloadPromise = page.waitForEvent("download");
-  await page.getByRole("button", { name: /JSON 내보내기/ }).click();
+  await page.getByRole("button", { name: /^JSON 내보내기/ }).click();
   const download = await downloadPromise;
   const stream = await download.createReadStream();
   const chunks = [];

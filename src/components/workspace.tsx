@@ -90,11 +90,14 @@ function download(text: string, filename: string) {
   const url = URL.createObjectURL(
     new Blob([text], { type: "application/json" }),
   );
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  try {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 }
 export function Workspace() {
   const { data, ready, error, importRecovery } = useAppStore();
@@ -419,12 +422,31 @@ export function Workspace() {
       notify(e instanceof Error ? e.message : "파일을 읽지 못했어요.", true);
     }
   }
+  function exportBackup(source: AppData, filename: string, label: string) {
+    try {
+      download(JSON.stringify(source, null, 2), filename);
+      notify(`${label} 다운로드를 요청했어요. 파일이 저장됐는지 확인해 주세요.`);
+    } catch {
+      notify(
+        "파일 내보내기를 시작하지 못했어요. 데이터는 그대로 유지돼요. 다시 시도해 주세요.",
+        true,
+      );
+    }
+  }
   function exportData() {
-    download(
-      JSON.stringify(data, null, 2),
+    exportBackup(
+      data,
       `with-ai-backup-${new Date().toISOString().slice(0, 10)}.json`,
+      "JSON 백업",
     );
-    notify("JSON 백업 파일을 내보냈어요.");
+  }
+  function exportRecoveryData() {
+    if (!importRecovery) return;
+    exportBackup(
+      importRecovery.data,
+      `with-ai-recovery-${importRecovery.savedAt.replace(/[:.]/g, "-")}.json`,
+      "복구본 JSON",
+    );
   }
   function resetAfterDataReplacement() {
     removeAllProgressNoteDrafts();
@@ -1118,14 +1140,29 @@ export function Workspace() {
                   </p>
                 </div>
               </div>
-              <button
-                className="button secondary"
-                onClick={() =>
-                  setModal({ kind: "restore-import", recovery: importRecovery })
-                }
-              >
-                교체 전 데이터 복구
-              </button>
+              <div className="import-recovery-actions">
+                <button
+                  className="button secondary"
+                  onClick={exportRecoveryData}
+                  aria-describedby="recovery-export-help"
+                >
+                  <ArrowDownToLine size={17} />
+                  복구본 JSON 내보내기
+                </button>
+                <button
+                  className="button secondary"
+                  onClick={() =>
+                    setModal({ kind: "restore-import", recovery: importRecovery })
+                  }
+                >
+                  <RotateCcw size={17} />
+                  교체 전 데이터 복구
+                </button>
+              </div>
+              <small id="recovery-export-help">
+                내보내기는 현재 데이터·초안·복구본을 바꾸지 않아요. 다음
+                가져오기로 복구본이 바뀌기 전에 파일로 보관할 수 있어요.
+              </small>
               <small>
                 최근 JSON 가져오기 직전의 확정 데이터 1개만 이 브라우저에
                 보관해요. 저장하지 않은 초안은 포함하지 않아요.

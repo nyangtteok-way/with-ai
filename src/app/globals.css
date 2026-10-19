@@ -1199,9 +1199,15 @@ input[aria-invalid="true"] {
   line-height: 1.7;
   overflow-wrap: anywhere;
 }
-.import-recovery > .button {
-  width: 100%;
+.import-recovery-actions {
+  display: grid;
+  gap: 8px;
   margin-top: 14px;
+}
+.import-recovery-actions .button {
+  width: 100%;
+  min-width: 0;
+  white-space: normal;
 }
 .import-recovery > small {
   display: block;
