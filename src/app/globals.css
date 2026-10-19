@@ -40,6 +40,7 @@ a {
   text-decoration: none;
 }
 button:focus-visible,
+.note-history summary:focus-visible,
 a:focus-visible {
   outline: 3px solid #a54c27;
   outline-offset: 3px;
@@ -1036,6 +1037,53 @@ input[aria-invalid="true"] {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+}
+.note-history {
+  margin-top: 24px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fafbfc;
+  overflow-wrap: anywhere;
+}
+.note-history summary {
+  min-height: 44px;
+  padding: 13px 14px;
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+.note-history-help {
+  padding: 0 14px 14px;
+  color: #626d7c;
+  font-size: 11px;
+  line-height: 1.8;
+}
+.note-history-list {
+  list-style: none;
+  padding: 0 10px 10px;
+}
+.note-history-list li {
+  border-top: 1px solid var(--line);
+}
+.note-history dl {
+  padding: 0 14px 14px;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.note-history dt {
+  margin-top: 10px;
+  font-weight: 600;
+  color: #4a5360;
+}
+.note-history dd {
+  color: #626d7c;
+}
+.note-history > .button {
+  width: calc(100% - 28px);
+  margin: 0 14px 14px;
+  white-space: normal;
 }
 .note-save .button {
   flex-shrink: 0;

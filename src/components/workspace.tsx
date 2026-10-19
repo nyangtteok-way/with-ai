@@ -35,6 +35,7 @@ import {
   now,
   parseBackup,
   summarize,
+  updateCardNote,
 } from "@/lib/model";
 import {
   retryLoad,
@@ -364,7 +365,7 @@ export function Workspace() {
         updatedAt: stamp,
         cards: project.cards.map((c) =>
           c.id === selectedCard.id
-            ? { ...c, updatedAt: stamp, note: { ...note, updatedAt: stamp } }
+            ? updateCardNote(c, note, stamp)
             : c,
         ),
       },

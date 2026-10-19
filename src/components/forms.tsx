@@ -36,6 +36,7 @@ import {
   statusLabel,
 } from "@/lib/model";
 import { reconcileFields, sameFields } from "@/lib/conflicts";
+import { NoteHistory } from "./note-history";
 
 export type EntitySaveResult<T> =
   | { ok: true }
@@ -806,6 +807,7 @@ export function CardDetail({
           </button>
         </div>
       </form>
+      <NoteHistory notes={card.noteHistory ?? []} />
       <div className="ai-callout">
         <Sparkles size={22} />
         <div>

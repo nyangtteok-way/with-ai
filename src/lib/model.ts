@@ -30,6 +30,8 @@ export interface Card {
   createdAt: string;
   updatedAt: string;
   note: ProgressNote;
+  // Newest replaced note first; absent in older v1 data.
+  noteHistory?: ProgressNote[];
 }
 export interface Project {
   id: string;
@@ -50,6 +52,27 @@ export function newId() {
 }
 export function now() {
   return new Date().toISOString();
+}
+export function updateCardNote(
+  card: Card,
+  fields: Pick<ProgressNote, "done" | "blocked" | "next">,
+  savedAt: string,
+): Card {
+  const changed =
+    card.note.done !== fields.done ||
+    card.note.blocked !== fields.blocked ||
+    card.note.next !== fields.next;
+  const hasPrevious =
+    card.note.updatedAt !== null ||
+    Boolean(card.note.done || card.note.blocked || card.note.next);
+  return {
+    ...card,
+    updatedAt: savedAt,
+    note: { ...fields, updatedAt: savedAt },
+    ...(changed && hasPrevious
+      ? { noteHistory: [{ ...card.note }, ...(card.noteHistory ?? [])] }
+      : {}),
+  };
 }
 export function statusLabel(status: Status) {
   return STATUSES.find((s) => s.value === status)!.label;
@@ -132,6 +155,15 @@ export function parseBackup(text: string): AppData {
       : fail();
   };
   const ids = new Set<string>();
+  const note = (value: unknown): ProgressNote => {
+    const n = obj(value);
+    return {
+      done: str(n.done),
+      blocked: str(n.blocked),
+      next: str(n.next),
+      updatedAt: n.updatedAt === null ? null : date(n.updatedAt),
+    };
+  };
   const id = (v: unknown): string => {
     const s = required(v, 128);
     if (ids.has(s)) fail();
@@ -157,9 +189,9 @@ export function parseBackup(text: string): AppData {
       createdAt: date(p.createdAt),
       updatedAt: date(p.updatedAt),
       cards: (p.cards as unknown[]).map((value) => {
-        const c = obj(value),
-          n = obj(c.note);
+        const c = obj(value);
         if (!STATUSES.some((s) => s.value === c.status)) fail();
+        if (c.noteHistory !== undefined && !Array.isArray(c.noteHistory)) fail();
         return {
           id: id(c.id),
           title: required(c.title, 120),
@@ -169,12 +201,10 @@ export function parseBackup(text: string): AppData {
           status: c.status as Status,
           createdAt: date(c.createdAt),
           updatedAt: date(c.updatedAt),
-          note: {
-            done: str(n.done),
-            blocked: str(n.blocked),
-            next: str(n.next),
-            updatedAt: n.updatedAt === null ? null : date(n.updatedAt),
-          },
+          note: note(c.note),
+          ...(c.noteHistory !== undefined
+            ? { noteHistory: (c.noteHistory as unknown[]).map(note) }
+            : {}),
         };
       }),
     };
