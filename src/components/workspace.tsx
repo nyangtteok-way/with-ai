@@ -29,6 +29,7 @@ import {
   Project,
   STATUSES,
   Status,
+  createBackupPayload,
   formatDate,
   generatePrompt,
   newId,
@@ -84,7 +85,7 @@ type Modal =
   | { kind: "projects" }
   | { kind: "delete-project"; projectId: string }
   | { kind: "delete-card"; cardId: string }
-  | { kind: "import"; data: AppData; filename: string }
+  | { kind: "import"; data: AppData; filename: string; bytes: number }
   | { kind: "restore-import"; recovery: ImportRecovery }
   | null;
 function download(text: string, filename: string) {
@@ -99,6 +100,45 @@ function download(text: string, filename: string) {
   } finally {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+}
+const BACKUP_WARNING_BYTES = MAX_BACKUP_BYTES * 0.8;
+function formatBackupBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024)
+    return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+}
+function BackupSize({ bytes }: { bytes: number }) {
+  const overLimit = bytes > MAX_BACKUP_BYTES;
+  const nearLimit = bytes >= BACKUP_WARNING_BYTES;
+  return (
+    <div
+      className={`backup-size ${overLimit ? "backup-size-over" : nearLimit ? "backup-size-warning" : ""}`}
+    >
+      <div className="backup-size-heading">
+        <strong>현재 백업 예상 크기</strong>
+        <span>{formatBackupBytes(bytes)} / 5MB</span>
+      </div>
+      <progress
+        aria-label="현재 JSON 백업 예상 크기"
+        aria-valuetext={`${formatBackupBytes(bytes)}, 가져오기 한도 5MB`}
+        max={MAX_BACKUP_BYTES}
+        value={Math.min(bytes, MAX_BACKUP_BYTES)}
+      />
+      <small>내보내는 실제 UTF-8 JSON 파일과 같은 기준이에요.</small>
+      {overLimit ? (
+        <p role="alert">
+          가져오기 한도를 넘었어요. 파일은 내보낼 수 있지만 이 앱으로 다시
+          가져오려면 데이터를 줄여야 해요.
+        </p>
+      ) : nearLimit ? (
+        <p>
+          가져오기 한도에 가까워요. 기록이 더 늘기 전에 백업 파일을 보관해
+          주세요.
+        </p>
+      ) : null}
+    </div>
+  );
 }
 export function Workspace() {
   const { data, ready, error, importRecovery } = useAppStore();
@@ -180,6 +220,18 @@ export function Workspace() {
     modal && "cardId" in modal
       ? project?.cards.find((c) => c.id === modal.cardId)
       : undefined;
+  const settingsOpen = modal?.kind === "settings";
+  const currentBackup = useMemo(
+    () => (settingsOpen ? createBackupPayload(data) : null),
+    [data, settingsOpen],
+  );
+  const recoveryBackup = useMemo(
+    () =>
+      settingsOpen && importRecovery
+        ? createBackupPayload(importRecovery.data)
+        : null,
+    [importRecovery, settingsOpen],
+  );
   const onUnsavedChange = useCallback(
     (dirty: boolean, onDiscard?: () => boolean) => {
       discardUnsavedRef.current = dirty ? (onDiscard ?? null) : null;
@@ -418,14 +470,19 @@ export function Workspace() {
       if (file.size > MAX_BACKUP_BYTES)
         throw new Error("5MB 이하의 JSON 백업 파일을 선택해 주세요.");
       const imported = parseBackup(await file.text());
-      setModal({ kind: "import", data: imported, filename: file.name });
+      setModal({
+        kind: "import",
+        data: imported,
+        filename: file.name,
+        bytes: file.size,
+      });
     } catch (e) {
       notify(e instanceof Error ? e.message : "파일을 읽지 못했어요.", true);
     }
   }
-  function exportBackup(source: AppData, filename: string, label: string) {
+  function exportBackup(text: string, filename: string, label: string) {
     try {
-      download(JSON.stringify(source, null, 2), filename);
+      download(text, filename);
       notify(`${label} 다운로드를 요청했어요. 파일이 저장됐는지 확인해 주세요.`);
     } catch {
       notify(
@@ -435,16 +492,17 @@ export function Workspace() {
     }
   }
   function exportData() {
+    if (!currentBackup) return;
     exportBackup(
-      data,
+      currentBackup.text,
       `with-ai-backup-${new Date().toISOString().slice(0, 10)}.json`,
       "JSON 백업",
     );
   }
   function exportRecoveryData() {
-    if (!importRecovery) return;
+    if (!importRecovery || !recoveryBackup) return;
     exportBackup(
-      importRecovery.data,
+      recoveryBackup.text,
       `with-ai-recovery-${importRecovery.savedAt.replace(/[:.]/g, "-")}.json`,
       "복구본 JSON",
     );
@@ -1122,6 +1180,7 @@ export function Workspace() {
               <ChevronRight size={18} />
             </button>
           </div>
+          {currentBackup && <BackupSize bytes={currentBackup.bytes} />}
           {importRecovery && (
             <div className="import-recovery">
               <div className="import-recovery-heading">
@@ -1138,6 +1197,8 @@ export function Workspace() {
                       0,
                     )}
                     개
+                    {recoveryBackup &&
+                      ` · 백업 ${formatBackupBytes(recoveryBackup.bytes)}`}
                   </p>
                 </div>
               </div>
@@ -1194,7 +1255,7 @@ export function Workspace() {
             <br />
             프로젝트 {modal.data.projects.length}개 · 작업 카드{" "}
             {modal.data.projects.reduce((n, p) => n + p.cards.length, 0)}개를
-            확인했어요.
+            확인했어요. · 파일 {formatBackupBytes(modal.bytes)}
           </p>
           <div className="import-warning">
             기존 프로젝트 {data.projects.length}개와 모든 카드·메모를 교체해요.

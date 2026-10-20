@@ -1214,6 +1214,90 @@ input[aria-invalid="true"] {
   color: #9099a5;
   margin-top: 5px;
 }
+.backup-size {
+  margin-top: 14px;
+  padding: 14px 15px;
+  border: 1px solid #e1e6ec;
+  border-radius: 11px;
+  background: #f8fafc;
+  color: #687483;
+}
+.backup-size-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+  font-size: 11px;
+}
+.backup-size-heading strong {
+  color: #4f5a68;
+  font-weight: 650;
+}
+.backup-size-heading span {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+}
+.backup-size progress {
+  display: block;
+  width: 100%;
+  height: 7px;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  accent-color: #6f8a79;
+}
+.backup-size progress::-webkit-progress-bar {
+  border-radius: 999px;
+  background: #dfe4e9;
+}
+.backup-size progress::-webkit-progress-value {
+  border-radius: 999px;
+  background: #6f8a79;
+}
+.backup-size progress::-moz-progress-bar {
+  border-radius: 999px;
+  background: #6f8a79;
+}
+.backup-size small,
+.backup-size p {
+  display: block;
+  margin-top: 8px;
+  font-size: 10px;
+  line-height: 1.75;
+}
+.backup-size p {
+  font-weight: 600;
+}
+.backup-size-warning {
+  border-color: #ead59c;
+  background: #fffae9;
+  color: #735d27;
+}
+.backup-size-warning progress {
+  accent-color: #c89522;
+}
+.backup-size-warning progress::-webkit-progress-value {
+  background: #c89522;
+}
+.backup-size-warning progress::-moz-progress-bar {
+  background: #c89522;
+}
+.backup-size-over {
+  border-color: #ebc2c6;
+  background: #fff6f7;
+  color: #8b3c45;
+}
+.backup-size-over progress {
+  accent-color: #b94c58;
+}
+.backup-size-over progress::-webkit-progress-value {
+  background: #b94c58;
+}
+.backup-size-over progress::-moz-progress-bar {
+  background: #b94c58;
+}
 .import-recovery {
   margin-top: 18px;
   padding: 16px;

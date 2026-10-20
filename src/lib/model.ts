@@ -47,6 +47,13 @@ export interface AppData {
 }
 export const EMPTY_DATA: AppData = { version: 1, projects: [] };
 export const MAX_BACKUP_BYTES = 5 * 1024 * 1024;
+export function createBackupPayload(data: AppData) {
+  const text = JSON.stringify(data);
+  return {
+    text,
+    bytes: new TextEncoder().encode(text).byteLength,
+  };
+}
 export function newId() {
   return crypto.randomUUID();
 }

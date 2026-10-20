@@ -1,8 +1,10 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
+  MAX_BACKUP_BYTES,
   Card,
   Project,
+  createBackupPayload,
   generatePrompt,
   parseBackup,
   summarize,
@@ -69,6 +71,25 @@ test("백업 roundtrip은 메모와 상태, 날짜를 보존한다", () => {
   c.note = { done: "구현 완료", blocked: "", next: "검증", updatedAt: stamp };
   const data = { version: 1, projects: [{ ...project, cards: [c] }] };
   assert.deepEqual(parseBackup(JSON.stringify(data)), data);
+});
+test("내보내기 JSON은 UTF-8 실제 크기를 계산하고 들여쓰기로 5MB를 넘기지 않는다", () => {
+  const cards = Array.from({ length: 9000 }, (_, index) => ({
+    ...card(`large-${index}`, "todo"),
+    description: "가".repeat(60),
+  }));
+  const data = {
+    version: 1 as const,
+    projects: [{ ...project, cards }],
+  };
+  const payload = createBackupPayload(data);
+  assert.equal(payload.text, JSON.stringify(data));
+  assert.equal(payload.bytes, Buffer.byteLength(payload.text, "utf8"));
+  assert.ok(payload.bytes <= MAX_BACKUP_BYTES);
+  assert.ok(
+    Buffer.byteLength(JSON.stringify(data, null, 2), "utf8") >
+      MAX_BACKUP_BYTES,
+  );
+  assert.deepEqual(parseBackup(payload.text), data);
 });
 test("잘못된 버전·타입·상태·날짜·중복 id·빈 제목을 거절한다", () => {
   const valid = () => ({
