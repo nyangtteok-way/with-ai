@@ -1,6 +1,7 @@
 "use client";
 import {
   useCallback,
+  useRef,
   useState,
   type FormEvent,
   type ReactNode,
@@ -597,6 +598,7 @@ export function CardDetail({
   onDirtyChange: UnsavedChangeHandler;
   onDraftChange: () => void;
 }) {
+  const noteFormRef = useRef<HTMLFormElement>(null);
   const [baseNote, setBaseNote] = useState(card.note);
   const [restoredDraft] = useState(() =>
     loadProgressNoteDraft(card.id, card.note.updatedAt),
@@ -611,6 +613,8 @@ export function CardDetail({
   const [conflictMessage, setConflictMessage] = useState("");
   const [draftStatus, setDraftStatus] = useState<
     | { kind: "restored" | "saved"; savedAt: string }
+    | { kind: "history"; matchesSaved: true }
+    | { kind: "history"; savedAt: string; matchesSaved: false }
     | { kind: "error"; message: string }
     | null
   >(
@@ -666,6 +670,66 @@ export function CardDetail({
         : { kind: "error", message: result.message },
     );
   }
+  function reuseNote(historyNote: Card["note"]) {
+    const next: NoteFields = {
+      done: historyNote.done,
+      blocked: historyNote.blocked,
+      next: historyNote.next,
+    };
+    if (sameFields(note, next)) {
+      noteFormRef.current
+        ?.querySelector<HTMLTextAreaElement>("#field-note-done")
+        ?.focus();
+      return;
+    }
+    if (
+      dirty &&
+      !window.confirm(
+        "저장하지 않은 현재 메모를 선택한 이전 기록으로 바꿀까요? 지금 작성 중인 내용은 사라집니다.",
+      )
+    )
+      return;
+
+    setNote(next);
+    setConflictMessage("");
+    const matchesSaved =
+      next.done === baseNote.done &&
+      next.blocked === baseNote.blocked &&
+      next.next === baseNote.next;
+    if (matchesSaved) {
+      if (removeProgressNoteDraft(card.id)) {
+        if (dirty) onDraftChange();
+        setDraftStatus({
+          kind: "history",
+          matchesSaved: true,
+        });
+      } else {
+        setDraftStatus({
+          kind: "error",
+          message:
+            "임시 메모를 지우지 못했어요. 브라우저 저장 권한을 확인한 뒤 다시 시도해 주세요.",
+        });
+      }
+    } else {
+      const result = saveProgressNoteDraft(card.id, baseNote.updatedAt, next);
+      if (result.ok && (!draftStatus || draftStatus.kind === "error"))
+        onDraftChange();
+      setDraftStatus(
+        result.ok
+          ? {
+              kind: "history",
+              savedAt: result.savedAt,
+              matchesSaved: false,
+            }
+          : { kind: "error", message: result.message },
+      );
+    }
+    requestAnimationFrame(() =>
+      noteFormRef.current
+        ?.querySelector<HTMLTextAreaElement>("#field-note-done")
+        ?.focus(),
+    );
+  }
   return (
     <>
       <div className="detail-toolbar">
@@ -700,6 +764,7 @@ export function CardDetail({
         <span>직접 작성하는 최신 기록</span>
       </div>
       <form
+        ref={noteFormRef}
         onSubmit={(e) => {
           e.preventDefault();
           const result = onNoteSave(note, baseNote);
@@ -794,6 +859,10 @@ export function CardDetail({
               ? draftStatus.message
               : draftStatus?.kind === "restored"
                 ? `임시 메모를 복구했어요 · ${formatDate(draftStatus.savedAt)} 임시 저장`
+                : draftStatus?.kind === "history"
+                  ? draftStatus.matchesSaved
+                    ? "선택한 이전 기록이 현재 저장 메모와 같은 내용이에요."
+                    : `${formatDate(draftStatus.savedAt)} 이전 기록을 현재 입력으로 불러와 이 기기에 임시 저장했어요. 내용을 확인한 뒤 메모 저장을 눌러 주세요.`
                 : draftStatus?.kind === "saved"
                   ? `${formatDate(draftStatus.savedAt)} 이 기기에 임시 저장됨`
                   : dirty
@@ -807,7 +876,7 @@ export function CardDetail({
           </button>
         </div>
       </form>
-      <NoteHistory notes={card.noteHistory ?? []} />
+      <NoteHistory notes={card.noteHistory ?? []} onReuse={reuseNote} />
       <div className="ai-callout">
         <Sparkles size={22} />
         <div>

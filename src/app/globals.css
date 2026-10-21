@@ -1060,6 +1060,52 @@ input[aria-invalid="true"] {
   font-size: 11px;
   line-height: 1.8;
 }
+.note-history-search {
+  padding: 0 14px 14px;
+}
+.note-history-search label {
+  display: block;
+  margin-bottom: 7px;
+  color: #4a5360;
+  font-size: 11px;
+  font-weight: 600;
+}
+.note-history-search > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.note-history-search input {
+  min-width: 0;
+  flex: 1;
+  min-height: 44px;
+  border: 1px solid #dfe3e8;
+  border-radius: 9px;
+  background: #fff;
+  padding: 10px 12px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+.note-history-search button {
+  min-height: 44px;
+  padding: 0 10px;
+  color: #626d7c;
+  font-size: 11px;
+  font-weight: 600;
+}
+.note-history-search p,
+.note-history-empty {
+  color: #737d8a;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.note-history-search p {
+  margin-top: 7px;
+}
+.note-history-empty {
+  padding: 0 14px 14px;
+}
 .note-history-list {
   list-style: none;
   padding: 0 10px 10px;
@@ -1079,6 +1125,12 @@ input[aria-invalid="true"] {
 }
 .note-history dd {
   color: #626d7c;
+}
+.note-history-reuse {
+  width: calc(100% - 28px);
+  min-height: 44px;
+  margin: 0 14px 14px;
+  white-space: normal;
 }
 .note-history > .button {
   width: calc(100% - 28px);

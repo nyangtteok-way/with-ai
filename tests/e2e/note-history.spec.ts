@@ -161,6 +161,87 @@ test("이전 메모를 순서대로 보존하고 조회 중 초안·최신 요�
   ]);
 });
 
+test("이전 메모를 검색해 현재 입력으로 불러오고 작성 중 내용은 확인 없이 덮지 않는다", async ({
+  page,
+}) => {
+  await seed(page, fixture(12));
+  await page.locator(".task-card").click();
+  await page.locator(".note-history > summary").click();
+  const search = page.getByRole("searchbox", { name: "이전 메모 검색" });
+  await search.fill("없는 기록");
+  await expect(page.locator(".note-history-list")).toHaveCount(0);
+  await expect(page.locator(".note-history-empty")).toHaveText(
+    "검색어와 일치하는 이전 메모가 없어요.",
+  );
+  await expect(page.locator(".note-history-search [role='status']")).toHaveText(
+    "0개의 이전 메모를 찾았어요.",
+  );
+  await page.getByRole("button", { name: "지우기", exact: true }).click();
+  await expect(page.locator(".note-history-list > li")).toHaveCount(10);
+
+  await search.fill("보관한 기록 12");
+  await expect(page.locator(".note-history-list > li")).toHaveCount(1);
+  await expect(page.locator(".note-history-search [role='status']")).toHaveText(
+    "1개의 이전 메모를 찾았어요.",
+  );
+  await page.locator(".note-history-list summary").click();
+  await expect(page.locator(".note-history-list")).toContainText(
+    "보관한 기록 12",
+  );
+  const reuse = page.getByRole("button", {
+    name: "이 기록을 현재 메모로 불러오기",
+    exact: true,
+  });
+  await page
+    .getByLabel("한 일", { exact: true })
+    .fill("아직 저장하지 않은 현재 작성 내용");
+  let confirmation = "";
+  page.once("dialog", async (dialog) => {
+    confirmation = dialog.message();
+    await dialog.dismiss();
+  });
+  await reuse.click();
+  expect(confirmation).toContain("저장하지 않은 현재 메모");
+  await expect(page.getByLabel("한 일", { exact: true })).toHaveValue(
+    "아직 저장하지 않은 현재 작성 내용",
+  );
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await reuse.click();
+  await expect(page.getByLabel("한 일", { exact: true })).toHaveValue(
+    "보관한 기록 12",
+  );
+  await expect(page.getByLabel("한 일", { exact: true })).toBeFocused();
+  await expect(page.locator(".note-save [role='status']")).toContainText(
+    "이전 기록을 현재 입력으로 불러와",
+  );
+  expect((await card(page)).note).toEqual(initialNote);
+
+  await page.setViewportSize({ width: 320, height: 844 });
+  expect(
+    await page
+      .getByRole("dialog")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth),
+  ).toBe(true);
+  expect((await search.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect((await reuse.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.reload();
+  await page.locator(".task-card").click();
+  await expect(page.getByLabel("한 일", { exact: true })).toHaveValue(
+    "보관한 기록 12",
+  );
+  await page.getByRole("button", { name: "메모 저장", exact: true }).click();
+  const saved = await card(page);
+  expect(saved.note.done).toBe("보관한 기록 12");
+  expect(saved.noteHistory).toHaveLength(13);
+  expect(saved.noteHistory![0]).toEqual(initialNote);
+  expect(saved.noteHistory!.some((note) => note.done === "보관한 기록 12")).toBe(
+    true,
+  );
+});
+
 test("메모 이력 더 보기와 v1 백업·자동 복구본·재가져오기가 기록을 보존한다", async ({
   page,
 }) => {
