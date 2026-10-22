@@ -19,12 +19,14 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
+  Star,
   Trash2,
   X,
 } from "lucide-react";
 import {
   AppData,
   Card,
+  CardSort,
   MAX_BACKUP_BYTES,
   Project,
   STATUSES,
@@ -35,6 +37,7 @@ import {
   newId,
   now,
   parseBackup,
+  sortCards,
   summarize,
   updateCardNote,
 } from "@/lib/model";
@@ -144,6 +147,7 @@ export function Workspace() {
   const { data, ready, error, importRecovery } = useAppStore();
   const [activeId, setActiveId] = useState<string | null>(null);
   const [filter, setFilter] = useState<Status | "all">("all");
+  const [cardSort, setCardSort] = useState<CardSort>("default");
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState<Modal>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -201,7 +205,7 @@ export function Workspace() {
   );
   const summary = summarize(project?.cards ?? []);
   const searchTerm = search.trim().toLowerCase();
-  const cards =
+  const cards = sortCards(
     project?.cards.filter(
       (c) =>
         (filter === "all" || c.status === filter) &&
@@ -215,7 +219,9 @@ export function Workspace() {
             c.note.blocked,
             c.note.next,
           ].some((value) => value.toLowerCase().includes(searchTerm))),
-    ) ?? [];
+    ) ?? [],
+    cardSort,
+  );
   const selectedCard =
     modal && "cardId" in modal
       ? project?.cards.find((c) => c.id === modal.cardId)
@@ -426,6 +432,30 @@ export function Workspace() {
     if (!saved) return { ok: false };
     removePromptDraft(project.id, selectedCard.id);
     return { ok: true, savedAt: stamp };
+  }
+  function toggleCardImportant(cardId: string) {
+    if (!project) return;
+    const existing = project.cards.find((card) => card.id === cardId);
+    if (!existing) {
+      notify("카드가 삭제되었어요. 목록을 다시 확인해 주세요.", true);
+      return;
+    }
+    const stamp = now();
+    const important = !existing.important;
+    updateProject(
+      {
+        ...project,
+        updatedAt: stamp,
+        cards: project.cards.map((card) =>
+          card.id === cardId
+            ? { ...card, important, updatedAt: stamp }
+            : card,
+        ),
+      },
+      important
+        ? "중요 작업으로 표시했어요."
+        : "중요 작업 표시를 해제했어요.",
+    );
   }
   function removeProject(id: string) {
     if (
@@ -821,6 +851,20 @@ export function Workspace() {
                     </button>
                   ))}
                 </div>
+                <div className="card-sort">
+                  <label htmlFor="card-sort">작업 정렬</label>
+                  <select
+                    id="card-sort"
+                    value={cardSort}
+                    onChange={(event) =>
+                      setCardSort(event.target.value as CardSort)
+                    }
+                  >
+                    <option value="default">기본 순서</option>
+                    <option value="important">중요 작업 먼저</option>
+                    <option value="recent">최근 수정 순</option>
+                  </select>
+                </div>
                 {cards.length ? (
                   <div className="card-list">
                     {cards.map((card) => (
@@ -833,7 +877,15 @@ export function Workspace() {
                       >
                         <div className="card-top">
                           <Badge status={card.status} />
-                          <ArrowUpRight className="card-arrow" size={19} />
+                          <span className="card-top-meta">
+                            {card.important && (
+                              <span className="important-badge">
+                                <Star size={13} fill="currentColor" />
+                                중요
+                              </span>
+                            )}
+                            <ArrowUpRight className="card-arrow" size={19} />
+                          </span>
                         </div>
                         <h3>{card.title}</h3>
                         <p className="card-description">
@@ -1042,6 +1094,7 @@ export function Workspace() {
           <CardDetail
             key={selectedCard.id}
             card={selectedCard}
+            onImportantToggle={() => toggleCardImportant(selectedCard.id)}
             onEdit={() => requestModal({ kind: "card", cardId: selectedCard.id })}
             onDelete={() =>
               requestModal({ kind: "delete-card", cardId: selectedCard.id })

@@ -73,6 +73,76 @@ test("카드 검색은 내용·메모·상태를 함께 찾고 저장 데이터�
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   }
 });
+test("중요 작업 표시를 저장하고 모바일 목록에서 선택 정렬한다", async ({
+  page,
+}) => {
+  await newProject(page);
+  await newCard(page, "먼저 볼 작업");
+  await newCard(page, "일반 작업");
+
+  await openCard(page, "먼저 볼 작업");
+  const importantToggle = page.getByRole("button", {
+    name: "중요 작업으로 표시",
+    exact: true,
+  });
+  await expect(importantToggle).toHaveAttribute("aria-pressed", "false");
+  expect((await importantToggle.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await importantToggle.click();
+  await expect(
+    page.getByRole("button", { name: "중요 작업 해제", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await expect(
+    page.getByText("중요 작업으로 표시했어요.", { exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+
+  const importantCard = page.locator(".task-card").filter({
+    has: page.getByRole("heading", { name: "먼저 볼 작업", exact: true }),
+  });
+  await expect(importantCard.getByText("중요", { exact: true })).toBeVisible();
+  const storedBeforeSort = await page.evaluate(() =>
+    localStorage.getItem("with-ai:data:v1"),
+  );
+  const sort = page.getByLabel("작업 정렬", { exact: true });
+  expect((await sort.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await sort.selectOption("important");
+  await expect(page.locator(".task-card h3").first()).toHaveText("먼저 볼 작업");
+  expect(
+    await page.evaluate(() => localStorage.getItem("with-ai:data:v1")),
+  ).toBe(storedBeforeSort);
+
+  await page.reload();
+  await expect(sort).toHaveValue("default");
+  await expect(importantCard.getByText("중요", { exact: true })).toBeVisible();
+  const stored = JSON.parse(
+    (await page.evaluate(() => localStorage.getItem("with-ai:data:v1")))!,
+  );
+  expect(
+    stored.projects[0].cards.find(
+      (card: { title: string }) => card.title === "먼저 볼 작업",
+    ).important,
+  ).toBe(true);
+  await importantCard.click();
+  await page
+    .getByRole("button", { name: "중요 작업 해제", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "중요 작업으로 표시", exact: true }),
+  ).toHaveAttribute("aria-pressed", "false");
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  await expect(importantCard.getByText("중요", { exact: true })).toHaveCount(0);
+  const storedAfterClear = JSON.parse(
+    (await page.evaluate(() => localStorage.getItem("with-ai:data:v1")))!,
+  );
+  expect(
+    storedAfterClear.projects[0].cards.find(
+      (card: { title: string }) => card.title === "먼저 볼 작업",
+    ).important,
+  ).toBe(false);
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
+  ).toBeTruthy();
+});
 test("모바일 CRUD, 메모, 필터, 집계, 지속 저장, 요청문, 백업 교체", async ({
   page,
   context,

@@ -7,6 +7,7 @@ import {
   createBackupPayload,
   generatePrompt,
   parseBackup,
+  sortCards,
   summarize,
 } from "../src/lib/model";
 const stamp = "2026-10-05T17:00:00.000Z";
@@ -56,6 +57,7 @@ test("진행률은 완료 / 활성 작업이며 제외 상태와 0개를 처리�
 });
 test("요청문은 빈 항목을 생략하고 사용자 입력을 그대로 담는다", () => {
   const c = card("1", "todo");
+  c.important = true;
   c.requirements = "색상을 변경하지 마";
   c.note.blocked = "테스트 실패";
   const prompt = generatePrompt(project, c);
@@ -64,13 +66,39 @@ test("요청문은 빈 항목을 생략하고 사용자 입력을 그대로 담�
   assert.ok(!prompt.includes("## 완료 조건"));
   assert.ok(!prompt.includes("## 프로젝트 설명"));
   assert.ok(!prompt.includes("진행 메모 — 한 일"));
+  assert.ok(!prompt.includes("중요 작업"));
   assert.ok(prompt.includes("기존 코드와 저장소의 작업 지침"));
 });
 test("백업 roundtrip은 메모와 상태, 날짜를 보존한다", () => {
   const c = card("1", "done");
+  c.important = true;
   c.note = { done: "구현 완료", blocked: "", next: "검증", updatedAt: stamp };
   const data = { version: 1, projects: [{ ...project, cards: [c] }] };
   assert.deepEqual(parseBackup(JSON.stringify(data)), data);
+});
+test("카드 정렬은 원본을 바꾸지 않고 중요 여부와 수정 시각을 안정적으로 적용한다", () => {
+  const first = card("first", "todo");
+  first.updatedAt = "2026-10-05T10:00:00.000Z";
+  const important = card("important", "doing");
+  important.updatedAt = "2026-10-05T09:00:00.000Z";
+  important.important = true;
+  const recent = card("recent", "done");
+  recent.updatedAt = "2026-10-05T11:00:00.000Z";
+  const cards = [first, important, recent];
+
+  assert.equal(sortCards(cards, "default"), cards);
+  assert.deepEqual(
+    sortCards(cards, "important").map(({ id }) => id),
+    ["important", "first", "recent"],
+  );
+  assert.deepEqual(
+    sortCards(cards, "recent").map(({ id }) => id),
+    ["recent", "first", "important"],
+  );
+  assert.deepEqual(
+    cards.map(({ id }) => id),
+    ["first", "important", "recent"],
+  );
 });
 test("내보내기 JSON은 UTF-8 실제 크기를 계산하고 들여쓰기로 5MB를 넘기지 않는다", () => {
   const cards = Array.from({ length: 9000 }, (_, index) => ({
@@ -121,6 +149,9 @@ test("잘못된 버전·타입·상태·날짜·중복 id·빈 제목을 거절�
   const f = valid();
   f.projects[0].name = "x".repeat(101);
   invalid.push(f);
+  const g = valid();
+  g.projects[0].cards[0].important = "yes" as unknown as boolean;
+  invalid.push(g);
   invalid.forEach((value) =>
     assert.throws(() => parseBackup(JSON.stringify(value))),
   );

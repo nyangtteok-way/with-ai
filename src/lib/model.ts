@@ -30,9 +30,12 @@ export interface Card {
   createdAt: string;
   updatedAt: string;
   note: ProgressNote;
+  // Optional so existing v1 data and backups remain compatible.
+  important?: boolean;
   // Newest replaced note first; absent in older v1 data.
   noteHistory?: ProgressNote[];
 }
+export type CardSort = "default" | "important" | "recent";
 export interface Project {
   id: string;
   name: string;
@@ -100,6 +103,20 @@ export function summarize(cards: Card[]) {
     completed: counts.done,
     percent: total ? Math.round((counts.done / total) * 100) : 0,
   };
+}
+export function sortCards(cards: Card[], sort: CardSort) {
+  if (sort === "default") return cards;
+  return cards
+    .map((card, index) => ({ card, index }))
+    .sort((a, b) => {
+      const difference =
+        sort === "important"
+          ? Number(Boolean(b.card.important)) -
+            Number(Boolean(a.card.important))
+          : Date.parse(b.card.updatedAt) - Date.parse(a.card.updatedAt);
+      return difference || a.index - b.index;
+    })
+    .map(({ card }) => card);
 }
 export function formatDate(date: string) {
   return new Intl.DateTimeFormat("ko-KR", {
@@ -198,6 +215,12 @@ export function parseBackup(text: string): AppData {
       cards: (p.cards as unknown[]).map((value) => {
         const c = obj(value);
         if (!STATUSES.some((s) => s.value === c.status)) fail();
+        const important =
+          c.important === undefined
+            ? undefined
+            : typeof c.important === "boolean"
+              ? c.important
+              : fail();
         if (c.noteHistory !== undefined && !Array.isArray(c.noteHistory)) fail();
         return {
           id: id(c.id),
@@ -209,6 +232,7 @@ export function parseBackup(text: string): AppData {
           createdAt: date(c.createdAt),
           updatedAt: date(c.updatedAt),
           note: note(c.note),
+          ...(important !== undefined ? { important } : {}),
           ...(c.noteHistory !== undefined
             ? { noteHistory: (c.noteHistory as unknown[]).map(note) }
             : {}),

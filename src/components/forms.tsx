@@ -6,7 +6,15 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { Check, Copy, FileText, Pencil, Sparkles, Trash2 } from "lucide-react";
+import {
+  Check,
+  Copy,
+  FileText,
+  Pencil,
+  Sparkles,
+  Star,
+  Trash2,
+} from "lucide-react";
 import {
   loadCardFormDraft,
   loadPromptDraft,
@@ -581,6 +589,7 @@ export function Badge({ status }: { status: Status }) {
 }
 export function CardDetail({
   card,
+  onImportantToggle,
   onEdit,
   onDelete,
   onNoteSave,
@@ -590,6 +599,7 @@ export function CardDetail({
   onDraftChange,
 }: {
   card: Card;
+  onImportantToggle: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onNoteSave: (note: NoteFields, base: Card["note"]) => NoteSaveResult;
@@ -734,10 +744,20 @@ export function CardDetail({
     <>
       <div className="detail-toolbar">
         <Badge status={card.status} />
-        <button className="button secondary small" onClick={onEdit}>
-          <Pencil size={16} />
-          카드 수정
-        </button>
+        <div className="detail-actions">
+          <button
+            className="button secondary small important-toggle"
+            aria-pressed={Boolean(card.important)}
+            onClick={onImportantToggle}
+          >
+            <Star size={16} fill={card.important ? "currentColor" : "none"} />
+            {card.important ? "중요 작업 해제" : "중요 작업으로 표시"}
+          </button>
+          <button className="button secondary small" onClick={onEdit}>
+            <Pencil size={16} />
+            카드 수정
+          </button>
+        </div>
       </div>
       <div className="detail-fields">
         {(
