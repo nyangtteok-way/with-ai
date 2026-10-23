@@ -1,4 +1,4 @@
-import { parseBackup, type AppData } from "./model";
+import { newId, parseBackup, type AppData, type Project } from "./model";
 
 export const IMPORT_RECOVERY_KEY = "with-ai:import-recovery:v1";
 
@@ -11,6 +11,42 @@ interface StoredImportRecovery {
 }
 
 export type ImportRecovery = Pick<StoredImportRecovery, "savedAt" | "data">;
+
+export function cloneRecoveryProject(
+  project: Project,
+  reservedIds: Iterable<string>,
+  createId: () => string = newId,
+): Project {
+  const usedIds = new Set(reservedIds);
+  usedIds.add(project.id);
+  project.cards.forEach((card) => usedIds.add(card.id));
+  const nextId = () => {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const candidate = createId();
+      if (
+        candidate.trim() &&
+        candidate.length <= 128 &&
+        !usedIds.has(candidate)
+      ) {
+        usedIds.add(candidate);
+        return candidate;
+      }
+    }
+    throw new Error("복구할 프로젝트의 새 식별자를 만들지 못했어요.");
+  };
+  return {
+    ...project,
+    id: nextId(),
+    cards: project.cards.map((card) => ({
+      ...card,
+      id: nextId(),
+      note: { ...card.note },
+      ...(card.noteHistory
+        ? { noteHistory: card.noteHistory.map((note) => ({ ...note })) }
+        : {}),
+    })),
+  };
+}
 
 function getStorage(storage?: StorageLike): StorageLike {
   return storage ?? globalThis.localStorage;

@@ -28,6 +28,8 @@ import {
   Card,
   CardSort,
   MAX_BACKUP_BYTES,
+  MAX_CARDS,
+  MAX_PROJECTS,
   Project,
   STATUSES,
   Status,
@@ -47,7 +49,10 @@ import {
   useAppStore,
   type SaveOptions,
 } from "@/lib/store";
-import type { ImportRecovery } from "@/lib/import-recovery";
+import {
+  cloneRecoveryProject,
+  type ImportRecovery,
+} from "@/lib/import-recovery";
 import {
   hasCardFormDraft,
   hasPromptDraft,
@@ -89,6 +94,11 @@ type Modal =
   | { kind: "delete-project"; projectId: string }
   | { kind: "delete-card"; cardId: string }
   | { kind: "import"; data: AppData; filename: string; bytes: number }
+  | {
+      kind: "restore-project";
+      recovery: ImportRecovery;
+      projectId: string;
+    }
   | { kind: "restore-import"; recovery: ImportRecovery }
   | null;
 function download(text: string, filename: string) {
@@ -226,6 +236,23 @@ export function Workspace() {
     modal && "cardId" in modal
       ? project?.cards.find((c) => c.id === modal.cardId)
       : undefined;
+  const selectedRecoveryProject =
+    modal?.kind === "restore-project"
+      ? modal.recovery.data.projects.find(
+          (item) => item.id === modal.projectId,
+        )
+      : undefined;
+  const currentCardCount = data.projects.reduce(
+    (count, item) => count + item.cards.length,
+    0,
+  );
+  const recoveryProjectLimitMessage = selectedRecoveryProject
+    ? data.projects.length >= MAX_PROJECTS
+      ? `프로젝트는 최대 ${MAX_PROJECTS.toLocaleString("ko-KR")}개까지 저장할 수 있어요.`
+      : currentCardCount + selectedRecoveryProject.cards.length > MAX_CARDS
+        ? `전체 작업 카드는 최대 ${MAX_CARDS.toLocaleString("ko-KR")}개까지 저장할 수 있어요.`
+        : ""
+    : "복구할 프로젝트를 다시 선택해 주세요.";
   const settingsOpen = modal?.kind === "settings";
   const currentBackup = useMemo(
     () => (settingsOpen ? createBackupPayload(data) : null),
@@ -536,6 +563,64 @@ export function Workspace() {
       `with-ai-recovery-${importRecovery.savedAt.replace(/[:.]/g, "-")}.json`,
       "복구본 JSON",
     );
+  }
+  function restoreRecoveryProject(
+    recovery: ImportRecovery,
+    projectId: string,
+  ) {
+    if (error) {
+      notify(
+        "현재 데이터를 읽을 수 없어 프로젝트를 추가하지 않았어요. 전체 복구나 정상 백업 가져오기를 이용해 주세요.",
+        true,
+      );
+      return;
+    }
+    const source = recovery.data.projects.find((item) => item.id === projectId);
+    if (!source) {
+      notify("복구할 프로젝트를 다시 선택해 주세요.", true);
+      return;
+    }
+    if (data.projects.length >= MAX_PROJECTS) {
+      notify(
+        `프로젝트는 최대 ${MAX_PROJECTS.toLocaleString("ko-KR")}개까지 저장할 수 있어 추가하지 않았어요.`,
+        true,
+      );
+      return;
+    }
+    if (currentCardCount + source.cards.length > MAX_CARDS) {
+      notify(
+        `전체 작업 카드는 최대 ${MAX_CARDS.toLocaleString("ko-KR")}개까지 저장할 수 있어 추가하지 않았어요.`,
+        true,
+      );
+      return;
+    }
+    let restored: Project;
+    try {
+      restored = cloneRecoveryProject(
+        source,
+        data.projects.flatMap((item) => [
+          item.id,
+          ...item.cards.map((card) => card.id),
+        ]),
+      );
+    } catch (restoreError) {
+      notify(
+        restoreError instanceof Error
+          ? restoreError.message
+          : "프로젝트 복사본을 만들지 못했어요.",
+        true,
+      );
+      return;
+    }
+    if (
+      persist(
+        { ...data, projects: [...data.projects, restored] },
+        `“${source.name}” 프로젝트를 현재 데이터에 추가했어요.`,
+        { kind: "restore-project", recovery },
+      )
+    ) {
+      selectProject(restored.id);
+    }
   }
   function resetAfterDataReplacement() {
     removeAllProgressNoteDrafts();
@@ -1266,6 +1351,23 @@ export function Workspace() {
                 </button>
                 <button
                   className="button secondary"
+                  disabled={!!error || importRecovery.data.projects.length === 0}
+                  aria-describedby="recovery-project-help"
+                  onClick={() => {
+                    const firstProject = importRecovery.data.projects[0];
+                    if (firstProject)
+                      setModal({
+                        kind: "restore-project",
+                        recovery: importRecovery,
+                        projectId: firstProject.id,
+                      });
+                  }}
+                >
+                  <Plus size={17} />
+                  프로젝트 선택 복구
+                </button>
+                <button
+                  className="button secondary"
                   onClick={() =>
                     setModal({ kind: "restore-import", recovery: importRecovery })
                   }
@@ -1277,6 +1379,15 @@ export function Workspace() {
               <small id="recovery-export-help">
                 내보내기는 현재 데이터·초안·복구본을 바꾸지 않아요. 다음
                 가져오기로 복구본이 바뀌기 전에 파일로 보관할 수 있어요.
+              </small>
+              <small id="recovery-project-help">
+                프로젝트 선택 복구는 현재 데이터·초안·복구본을 유지한 채 선택한
+                프로젝트의 복사본만 추가해요.
+                {error
+                  ? " 현재 데이터를 읽을 수 없어 전체 복구만 사용할 수 있어요."
+                  : importRecovery.data.projects.length === 0
+                    ? " 복구본에 추가할 프로젝트가 없어요."
+                    : ""}
               </small>
               <small>
                 최근 JSON 가져오기 직전의 확정 데이터 1개만 이 브라우저에
@@ -1340,6 +1451,80 @@ export function Workspace() {
               데이터 교체
             </button>
           </div>
+        </Dialog>
+      )}
+      {modal?.kind === "restore-project" && (
+        <Dialog
+          notice={notification}
+          title="프로젝트 하나만 복구할까요?"
+          onClose={() => setModal({ kind: "settings" })}
+        >
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              restoreRecoveryProject(modal.recovery, modal.projectId);
+            }}
+          >
+            <div className="field">
+              <label htmlFor="recovery-project">복구할 프로젝트</label>
+              <select
+                id="recovery-project"
+                value={modal.projectId}
+                data-dialog-autofocus
+                onChange={(event) =>
+                  setModal({
+                    kind: "restore-project",
+                    recovery: modal.recovery,
+                    projectId: event.target.value,
+                  })
+                }
+              >
+                {modal.recovery.data.projects.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} · 작업 카드 {item.cards.length}개
+                  </option>
+                ))}
+              </select>
+            </div>
+            {selectedRecoveryProject && (
+              <p className="confirm-copy restore-project-summary">
+                <strong className="break-all">
+                  {selectedRecoveryProject.name}
+                </strong>
+                <br />
+                작업 카드 {selectedRecoveryProject.cards.length}개 · 마지막 수정{" "}
+                {formatDate(selectedRecoveryProject.updatedAt)}
+              </p>
+            )}
+            <div className="restore-project-info" id="restore-project-help">
+              현재 프로젝트와 작성 중인 초안은 그대로 두고 선택한 프로젝트를
+              별도 항목으로 추가해요. 같은 이름의 프로젝트가 있어도 구분된
+              복사본으로 저장하며, 원본 복구 지점도 계속 남아요.
+            </div>
+            {recoveryProjectLimitMessage && (
+              <p className="field-error restore-project-limit" role="alert">
+                {recoveryProjectLimitMessage}
+              </p>
+            )}
+            <div className="form-actions">
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => setModal({ kind: "settings" })}
+              >
+                취소
+              </button>
+              <button
+                className="button primary"
+                type="submit"
+                disabled={!!recoveryProjectLimitMessage}
+                aria-describedby="restore-project-help"
+              >
+                <Plus size={18} />
+                현재 데이터에 추가
+              </button>
+            </div>
+          </form>
         </Dialog>
       )}
       {modal?.kind === "restore-import" && (

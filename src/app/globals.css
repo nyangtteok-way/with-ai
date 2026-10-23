@@ -1477,6 +1477,24 @@ input[aria-invalid="true"] {
   line-height: 1.8;
   margin-bottom: 20px;
 }
+.restore-project-summary {
+  margin-top: -5px;
+  margin-bottom: 18px;
+}
+.restore-project-info {
+  background: #f2f8f4;
+  border: 1px solid #d6e7db;
+  color: #587063;
+  font-size: 12px;
+  padding: 15px;
+  border-radius: 10px;
+  line-height: 1.8;
+  margin-bottom: 20px;
+  overflow-wrap: anywhere;
+}
+.restore-project-limit {
+  margin: -7px 0 14px;
+}
 .toast {
   position: fixed;
   z-index: 20;

@@ -50,6 +50,8 @@ export interface AppData {
 }
 export const EMPTY_DATA: AppData = { version: 1, projects: [] };
 export const MAX_BACKUP_BYTES = 5 * 1024 * 1024;
+export const MAX_PROJECTS = 1000;
+export const MAX_CARDS = 10000;
 export function createBackupPayload(data: AppData) {
   const text = JSON.stringify(data);
   return {
@@ -198,13 +200,13 @@ export function parseBackup(text: string): AppData {
   if (
     root.version !== 1 ||
     !Array.isArray(root.projects) ||
-    root.projects.length > 1000
+    root.projects.length > MAX_PROJECTS
   )
     fail();
   let cardCount = 0;
   const projects = (root.projects as unknown[]).map((value) => {
     const p = obj(value);
-    if (!Array.isArray(p.cards) || (cardCount += p.cards.length) > 10000)
+    if (!Array.isArray(p.cards) || (cardCount += p.cards.length) > MAX_CARDS)
       fail();
     return {
       id: id(p.id),

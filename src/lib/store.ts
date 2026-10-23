@@ -19,7 +19,8 @@ type Snapshot = {
 export type SaveOptions =
   | { kind?: "edit" }
   | { kind: "import" }
-  | { kind: "restore"; recovery: ImportRecovery };
+  | { kind: "restore"; recovery: ImportRecovery }
+  | { kind: "restore-project"; recovery: ImportRecovery };
 const serverSnapshot: Snapshot = {
   data: EMPTY_DATA,
   ready: false,
@@ -101,7 +102,7 @@ export function saveData(
       };
     }
     let importRecovery = loadImportRecovery(raw);
-    if (options.kind === "restore") {
+    if (options.kind === "restore" || options.kind === "restore-project") {
       if (
         !importRecovery ||
         JSON.stringify(importRecovery) !== JSON.stringify(options.recovery)
@@ -114,7 +115,7 @@ export function saveData(
             "복구 지점이 바뀌었어요. 설정에서 최신 복구 지점을 다시 확인해 주세요.",
         };
       }
-      importRecovery = null;
+      if (options.kind === "restore") importRecovery = null;
     } else if (options.kind === "import" && !snapshot.error) {
       importRecovery = createImportRecovery(snapshot.data);
     }

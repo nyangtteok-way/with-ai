@@ -111,6 +111,23 @@ test("새 저장 형식에서도 일반 편집과 실패한 가져오기·복구
   assert.equal(loadImportRecovery(storage.getItem(STORAGE_KEY), storage), null);
 });
 
+test("프로젝트 선택 복구는 현재 데이터에 합치고 복구 지점은 그대로 유지한다", (t) => {
+  const { storage } = setup(t, serializeStoredData(current, recovery));
+  const merged: AppData = {
+    version: 1,
+    projects: [...current.projects, ...previous.projects],
+  };
+
+  assert.equal(
+    saveData(merged, { kind: "restore-project", recovery }).ok,
+    true,
+  );
+  const stored = storage.getItem(STORAGE_KEY)!;
+  assert.deepEqual(parseBackup(stored), merged);
+  assert.deepEqual(loadImportRecovery(stored, storage), recovery);
+  assert.equal(storage.getItem(IMPORT_RECOVERY_KEY), null);
+});
+
 test("아직 읽지 않은 다른 탭 변경은 복구본을 만들기 전에 가져오기를 중단한다", (t) => {
   const { storage } = setup(t);
   const changed = serializeStoredData(projectData("다른 탭 변경"), recovery);
@@ -132,6 +149,15 @@ test("확인 중 복구 지점이 바뀌면 오래된 복구 확인으로 덮어
   const result = saveData(previous, { kind: "restore", recovery });
   assert.equal(result.ok, false);
   assert.match(result.ok ? "" : result.message, /복구 지점이 바뀌었어요/);
+  const partialResult = saveData(previous, {
+    kind: "restore-project",
+    recovery,
+  });
+  assert.equal(partialResult.ok, false);
+  assert.match(
+    partialResult.ok ? "" : partialResult.message,
+    /복구 지점이 바뀌었어요/,
+  );
   assert.deepEqual(parseBackup(storage.getItem(STORAGE_KEY)!), current);
   assert.deepEqual(
     loadImportRecovery(storage.getItem(STORAGE_KEY), storage),
