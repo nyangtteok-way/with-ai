@@ -5,6 +5,12 @@ test("모바일 홈 화면 설치용 매니페스트와 아이콘을 제공한�
   page,
   request,
 }) => {
+  const runtimeErrors: string[] = [];
+  page.on("pageerror", (error) => runtimeErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") runtimeErrors.push(message.text());
+  });
+
   const manifestResponse = await request.get("/manifest.webmanifest");
   expect(manifestResponse.ok()).toBe(true);
   expect(manifestResponse.headers()["content-type"]).toContain(
@@ -130,4 +136,132 @@ test("모바일 홈 화면 설치용 매니페스트와 아이콘을 제공한�
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true);
+  expect(runtimeErrors).toEqual([]);
+});
+
+test("준비된 앱 셸과 기기 데이터를 네트워크 없이 다시 연다", async ({
+  context,
+  page,
+  request,
+}) => {
+  const runtimeErrors: string[] = [];
+  page.on("pageerror", (error) => runtimeErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") runtimeErrors.push(message.text());
+  });
+
+  const workerResponse = await request.get("/sw.js");
+  expect(workerResponse.ok()).toBe(true);
+  expect(workerResponse.headers()["content-type"]).toContain(
+    "application/javascript",
+  );
+  expect(workerResponse.headers()["cache-control"]).toBe(
+    "no-cache, no-store, must-revalidate",
+  );
+  expect(workerResponse.headers()["content-security-policy"]).toBe(
+    "default-src 'self'; script-src 'self'",
+  );
+  expect(workerResponse.headers()["service-worker-allowed"]).toBe("/");
+  expect(workerResponse.headers()["x-content-type-options"]).toBe("nosniff");
+
+  await page.goto("/icon.svg");
+  await page.evaluate(async () => {
+    const oldCache = await caches.open("with-ai-app-shell-old");
+    await oldCache.put("/old", new Response("old"));
+  });
+
+  await page.goto("/");
+  await page.evaluate(async () => {
+    await navigator.serviceWorker.ready;
+    if (!navigator.serviceWorker.controller) {
+      await new Promise<void>((resolve) => {
+        navigator.serviceWorker.addEventListener(
+          "controllerchange",
+          () => resolve(),
+          { once: true },
+        );
+      });
+    }
+  });
+
+  const cacheState = await page.evaluate(async () => {
+    const names = await caches.keys();
+    const current = names.find((name) => name === "with-ai-app-shell-v1");
+    const entries = current
+      ? (await (await caches.open(current)).keys()).map((entry) => entry.url)
+      : [];
+    return { names, entries };
+  });
+  expect(cacheState.names).toContain("with-ai-app-shell-v1");
+  expect(cacheState.names).not.toContain("with-ai-app-shell-old");
+  expect(cacheState.entries).toContain("http://127.0.0.1:3000/");
+  expect(
+    cacheState.entries.some(
+      (url) => url.includes("/_next/static/") && url.endsWith(".js"),
+    ),
+  ).toBe(true);
+  expect(cacheState.entries.some((url) => url.includes("with-ai:data:v1"))).toBe(
+    false,
+  );
+
+  await page.evaluate(async () => {
+    const cache = await caches.open("with-ai-app-shell-v1");
+    await cache.put(
+      "/",
+      new Response("<!doctype html><title>stale shell</title>", {
+        headers: { "Content-Type": "text/html" },
+      }),
+    );
+  });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        const cache = await caches.open("with-ai-app-shell-v1");
+        return (await (await cache.match("/"))!.text()).includes("stale shell");
+      }),
+    )
+    .toBe(false);
+
+  await page
+    .getByRole("button", { name: "첫 프로젝트 만들기", exact: true })
+    .click();
+  await page.getByLabel("프로젝트 이름").fill("오프라인 계획");
+  await page.getByLabel("프로젝트 설명").fill("연결이 없어도 이어서 확인");
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: "프로젝트 만들기", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "오프라인 계획", exact: true }),
+  ).toBeVisible();
+
+  await context.setOffline(true);
+  try {
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: "오프라인 계획", exact: true }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(() =>
+        JSON.parse(localStorage.getItem("with-ai:data:v1")!).projects.some(
+          (project: { name: string }) => project.name === "오프라인 계획",
+        ),
+      ),
+    ).toBe(true);
+
+    await page.goto("about:blank");
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect(
+      page.getByRole("heading", { name: "오프라인 계획", exact: true }),
+    ).toBeVisible();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= window.innerWidth,
+      ),
+    ).toBe(true);
+    expect(runtimeErrors).toEqual([]);
+  } finally {
+    await context.setOffline(false);
+  }
 });
