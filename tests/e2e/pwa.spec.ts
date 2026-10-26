@@ -131,12 +131,35 @@ test("모바일 홈 화면 설치용 매니페스트와 아이콘을 제공한�
   await expect(page.getByRole("dialog")).toContainText(
     "브라우저 메뉴의 앱 설치/홈 화면에 추가",
   );
+  await expect(page.getByRole("dialog").getByRole("status")).toContainText(
+    "오프라인 사용 준비됨",
+  );
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,
     ),
   ).toBe(true);
   expect(runtimeErrors).toEqual([]);
+});
+
+test("앱 셸을 준비하지 못하면 설정에서 실패를 정확히 알린다", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator.serviceWorker, "register", {
+      configurable: true,
+      value: () => Promise.reject(new Error("service worker blocked for test")),
+    });
+  });
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+
+  const status = page.getByRole("dialog").getByRole("status");
+  await expect(status).toContainText("오프라인 준비 실패");
+  await expect(status).toContainText(
+    "저장한 데이터와 JSON 백업에는 영향이 없어요",
+  );
 });
 
 test("준비된 앱 셸과 기기 데이터를 네트워크 없이 다시 연다", async ({
@@ -255,6 +278,10 @@ test("준비된 앱 셸과 기기 데이터를 네트워크 없이 다시 연다
     await expect(
       page.getByRole("heading", { name: "오프라인 계획", exact: true }),
     ).toBeVisible();
+    await page.getByRole("button", { name: "설정", exact: true }).click();
+    await expect(page.getByRole("dialog").getByRole("status")).toContainText(
+      "오프라인 사용 준비됨",
+    );
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth,

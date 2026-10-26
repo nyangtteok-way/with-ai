@@ -84,6 +84,7 @@ import {
   type NoteSaveResult,
 } from "./forms";
 import { Dialog } from "./dialog";
+import { OfflinePreparationStatus } from "./offline-preparation-status";
 type Modal =
   | { kind: "project"; projectId?: string }
   | { kind: "card"; cardId?: string }
@@ -1296,6 +1297,7 @@ export function Workspace() {
               </p>
             </div>
           </div>
+          <OfflinePreparationStatus />
           <div className="backup-actions">
             <button disabled={!!error} onClick={exportData}>
               <span className="backup-icon">
