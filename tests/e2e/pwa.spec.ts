@@ -132,7 +132,7 @@ test("모바일 홈 화면 설치용 매니페스트와 아이콘을 제공한�
     "브라우저 메뉴의 앱 설치/홈 화면에 추가",
   );
   await expect(page.getByRole("dialog").getByRole("status")).toContainText(
-    "오프라인 사용 준비됨",
+    "오프라인 앱 최신 상태",
   );
   expect(
     await page.evaluate(
@@ -226,6 +226,9 @@ test("준비된 앱 셸과 기기 데이터를 네트워크 없이 다시 연다
   expect(cacheState.entries.some((url) => url.includes("with-ai:data:v1"))).toBe(
     false,
   );
+  expect(cacheState.entries).toContain(
+    "http://127.0.0.1:3000/__with-ai-app-shell-fingerprint",
+  );
 
   await page.evaluate(async () => {
     const cache = await caches.open("with-ai-app-shell-v1");
@@ -234,6 +237,10 @@ test("준비된 앱 셸과 기기 데이터를 네트워크 없이 다시 연다
       new Response("<!doctype html><title>stale shell</title>", {
         headers: { "Content-Type": "text/html" },
       }),
+    );
+    await cache.put(
+      "/__with-ai-app-shell-fingerprint",
+      new Response('["/stale.js"]'),
     );
   });
   await page.reload({ waitUntil: "domcontentloaded" });
@@ -245,6 +252,11 @@ test("준비된 앱 셸과 기기 데이터를 네트워크 없이 다시 연다
       }),
     )
     .toBe(false);
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  await expect(page.getByRole("dialog").getByRole("status")).toContainText(
+    "오프라인 앱 최신 상태",
+  );
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
 
   await page
     .getByRole("button", { name: "첫 프로젝트 만들기", exact: true })
@@ -280,7 +292,7 @@ test("준비된 앱 셸과 기기 데이터를 네트워크 없이 다시 연다
     ).toBeVisible();
     await page.getByRole("button", { name: "설정", exact: true }).click();
     await expect(page.getByRole("dialog").getByRole("status")).toContainText(
-      "오프라인 사용 준비됨",
+      "오프라인 앱 최신 상태",
     );
     expect(
       await page.evaluate(

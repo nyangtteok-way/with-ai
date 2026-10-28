@@ -1,17 +1,22 @@
-export const APP_SHELL_CACHE_PREFIX = "with-ai-app-shell-";
-export const APP_SHELL_CACHE_NAME = `${APP_SHELL_CACHE_PREFIX}v1`;
+import {
+  APP_SHELL_CACHE_NAME,
+  APP_SHELL_CACHE_PREFIX,
+  APP_SHELL_FINGERPRINT_PATH,
+  APP_SHELL_FIXED_ASSETS,
+  APP_SHELL_UPDATED_MESSAGE,
+} from "./service-worker-contract";
+
+export {
+  APP_SHELL_CACHE_NAME,
+  APP_SHELL_CACHE_PREFIX,
+} from "./service-worker-contract";
 
 export const SERVICE_WORKER_SOURCE = String.raw`
 const CACHE_PREFIX = ${JSON.stringify(APP_SHELL_CACHE_PREFIX)};
 const CACHE_NAME = ${JSON.stringify(APP_SHELL_CACHE_NAME)};
-const FIXED_ASSETS = [
-  "/manifest.webmanifest",
-  "/icon.svg",
-  "/apple-icon.png",
-  "/icon-192.png",
-  "/icon-512.png",
-  "/icon-maskable-512.png",
-];
+const FINGERPRINT_PATH = ${JSON.stringify(APP_SHELL_FINGERPRINT_PATH)};
+const UPDATED_MESSAGE = ${JSON.stringify(APP_SHELL_UPDATED_MESSAGE)};
+const FIXED_ASSETS = ${JSON.stringify(APP_SHELL_FIXED_ASSETS)};
 
 function absoluteUrl(path) {
   return new URL(path, self.location.origin).href;
@@ -35,6 +40,10 @@ function appShellAssets(html) {
   return [...assets];
 }
 
+function appShellFingerprint(assets) {
+  return JSON.stringify([...new Set(assets)].sort());
+}
+
 async function fetchForCache(path) {
   const response = await fetch(path, { cache: "no-store" });
   if (!response.ok) {
@@ -50,7 +59,12 @@ async function updateAppShell(pageResponse) {
 
   const html = await pageResponse.clone().text();
   const assets = appShellAssets(html);
+  const fingerprint = appShellFingerprint(assets);
   const cache = await caches.open(CACHE_NAME);
+  const previousFingerprintResponse = await cache.match(FINGERPRINT_PATH);
+  const previousFingerprint = previousFingerprintResponse
+    ? await previousFingerprintResponse.text()
+    : null;
 
   // 새 화면이 참조하는 파일을 모두 확보한 뒤에만 오프라인 시작 화면을
   // 교체한다. 연결이 중간에 끊기면 마지막 정상 셸을 계속 사용한다.
@@ -61,6 +75,19 @@ async function updateAppShell(pageResponse) {
     }),
   );
   await cache.put("/", pageResponse);
+
+  let preparedFingerprint = null;
+  try {
+    await cache.put(
+      FINGERPRINT_PATH,
+      new Response(fingerprint, {
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+      }),
+    );
+    preparedFingerprint = fingerprint;
+  } catch {
+    // 지문 기록 실패가 정상 앱 셸 교체를 되돌리지는 않도록 한다.
+  }
 
   const keep = new Set(["/", ...assets].map(absoluteUrl));
   const requests = await cache.keys();
@@ -77,6 +104,17 @@ async function updateAppShell(pageResponse) {
       return Promise.resolve(false);
     }),
   );
+
+  return preparedFingerprint !== previousFingerprint
+    ? preparedFingerprint
+    : null;
+}
+
+async function notifyAppShellUpdated(fingerprint) {
+  const windows = await self.clients.matchAll({ type: "window" });
+  windows.forEach((client) => {
+    client.postMessage({ type: UPDATED_MESSAGE, fingerprint });
+  });
 }
 
 async function cacheFirst(request) {
@@ -135,9 +173,11 @@ self.addEventListener("fetch", (event) => {
     }));
     event.waitUntil(
       network
-        .then(({ cacheResponse }) =>
-          cacheResponse ? updateAppShell(cacheResponse) : undefined,
-        )
+        .then(async ({ cacheResponse }) => {
+          if (!cacheResponse) return;
+          const fingerprint = await updateAppShell(cacheResponse);
+          if (fingerprint) await notifyAppShellUpdated(fingerprint);
+        })
         .catch(() => undefined),
     );
     event.respondWith(

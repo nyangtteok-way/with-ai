@@ -33,6 +33,11 @@ const STATUS_COPY: Record<
     description:
       "이제 네트워크 없이 앱을 다시 열거나 새로고침해도 저장한 내용을 볼 수 있어요.",
   },
+  updated: {
+    title: "오프라인 앱 최신 상태",
+    description:
+      "현재 화면에 필요한 파일이 모두 반영됐어요. 다음 오프라인 실행에도 같은 화면을 사용할 수 있어요.",
+  },
   unsupported: {
     title: "오프라인 재실행 미지원",
     description:
@@ -51,7 +56,8 @@ const STATUS_COPY: Record<
 };
 
 function StatusIcon({ status }: { status: ServiceWorkerStatus }) {
-  if (status === "ready") return <CheckCircle2 aria-hidden="true" />;
+  if (status === "ready" || status === "updated")
+    return <CheckCircle2 aria-hidden="true" />;
   if (status === "error") return <CircleAlert aria-hidden="true" />;
   if (status === "unsupported") return <WifiOff aria-hidden="true" />;
   if (status === "development") return <Code2 aria-hidden="true" />;

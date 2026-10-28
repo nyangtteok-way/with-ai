@@ -2,6 +2,7 @@ export type ServiceWorkerStatus =
   | "checking"
   | "preparing"
   | "ready"
+  | "updated"
   | "unsupported"
   | "development"
   | "error";

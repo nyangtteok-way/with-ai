@@ -1289,13 +1289,16 @@ input[aria-invalid="true"] {
 .offline-preparation-preparing > svg {
   animation: offline-preparation-spin 1.1s linear infinite;
 }
-.offline-preparation-ready {
+.offline-preparation-ready,
+.offline-preparation-updated {
   background: #f1f8f3;
   border-color: #d2e6d8;
   color: #4f805f;
 }
 .offline-preparation-ready strong,
-.offline-preparation-ready p {
+.offline-preparation-ready p,
+.offline-preparation-updated strong,
+.offline-preparation-updated p {
   color: #4d7359;
 }
 .offline-preparation-error {
