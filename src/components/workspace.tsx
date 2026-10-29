@@ -655,6 +655,7 @@ export function Workspace() {
         <button
           key={p.id}
           className={`project-nav ${project?.id === p.id ? "active" : ""}`}
+          aria-current={project?.id === p.id ? "true" : undefined}
           onClick={() => selectProject(p.id)}
         >
           <Folder size={18} />
@@ -662,7 +663,12 @@ export function Workspace() {
           {draftIndicators.projectFormIds.has(p.id) && (
             <span className="nav-draft">초안</span>
           )}
-          <span className="nav-count">{p.cards.length}</span>
+          <span
+            className="nav-count"
+            aria-label={`작업 카드 ${p.cards.length}개`}
+          >
+            {p.cards.length}
+          </span>
         </button>
       ))}
       <button
@@ -772,6 +778,9 @@ export function Workspace() {
             <>
               <button
                 className="mobile-project-picker"
+                aria-label={`프로젝트 선택, 현재 ${project.name}`}
+                aria-haspopup="dialog"
+                aria-expanded={modal?.kind === "projects"}
                 onClick={() => setModal({ kind: "projects" })}
               >
                 <Folder size={17} />
@@ -1071,7 +1080,11 @@ export function Workspace() {
         </main>
       </div>
       <nav className="mobile-bottom" aria-label="주요 작업">
-        <button onClick={() => setModal({ kind: "projects" })}>
+        <button
+          aria-haspopup="dialog"
+          aria-expanded={modal?.kind === "projects"}
+          onClick={() => setModal({ kind: "projects" })}
+        >
           <Folder size={20} />
           <span>프로젝트</span>
         </button>

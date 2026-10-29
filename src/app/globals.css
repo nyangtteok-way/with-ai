@@ -559,7 +559,7 @@ select {
   border: 1px solid var(--line);
   background: #fff;
   border-radius: 8px;
-  min-height: 38px;
+  min-height: 44px;
   padding: 8px 11px;
   color: var(--muted);
   font-size: 11px;
@@ -1218,7 +1218,7 @@ input[aria-invalid="true"] {
 .ai-callout .button {
   margin-left: auto;
   font-size: 11px;
-  min-height: 40px;
+  min-height: 44px;
 }
 .ai-callout > .field-hint {
   width: 100%;
@@ -1582,11 +1582,17 @@ input[aria-invalid="true"] {
 }
 .toast button {
   display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
   background: transparent;
   border: 0;
-  padding: 4px;
+  border-radius: 8px;
+  padding: 0;
   color: #c3cad4;
-  margin-left: 10px;
+  margin: -9px -9px -9px 1px;
 }
 .toast-error {
   background: #963a43;
@@ -1703,10 +1709,10 @@ input[aria-invalid="true"] {
     border: 0;
     color: var(--muted);
     padding: 0;
-    margin-bottom: 24px;
+    margin-bottom: 10px;
     font-size: 11px;
     max-width: 100%;
-    min-height: 30px;
+    min-height: 44px;
   }
   .mobile-project-picker > span {
     overflow: hidden;
@@ -1792,7 +1798,7 @@ input[aria-invalid="true"] {
     margin-bottom: 16px;
   }
   .filters > button {
-    min-height: 40px;
+    min-height: 44px;
     justify-content: center;
     gap: 5px;
     padding: 9px 5px;
