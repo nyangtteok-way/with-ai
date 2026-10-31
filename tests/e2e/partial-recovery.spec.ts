@@ -73,7 +73,22 @@ const recoveryData: AppData = {
   ],
 };
 
-async function seed(page: Page) {
+const currentForCardRecovery: AppData = {
+  version: 1,
+  projects: [
+    current.projects[0],
+    {
+      id: "destination-project",
+      name: "카드를 받을 프로젝트",
+      description: "현재 카드와 프로젝트 내용을 유지할 대상",
+      createdAt: stamp,
+      updatedAt: stamp,
+      cards: [card("destination-card", "계속 유지할 대상 카드")],
+    },
+  ],
+};
+
+async function seed(page: Page, initialData: AppData = current) {
   await page.goto("/");
   await page.evaluate(
     ({ current, recoveryData, stamp }) =>
@@ -88,7 +103,7 @@ async function seed(page: Page) {
           },
         }),
       ),
-    { current, recoveryData, stamp },
+    { current: initialData, recoveryData, stamp },
   );
   await page.reload();
 }
@@ -205,6 +220,140 @@ test("복구본의 프로젝트 하나를 현재 데이터·초안·복구본을
   await expect(page.locator(".import-recovery")).toContainText(
     "프로젝트 2개 · 작업 카드 1개",
   );
+  await expect(
+    page.getByRole("button", { name: "프로젝트 선택 복구", exact: true }),
+  ).toBeEnabled();
+  await expect(
+    page.getByRole("button", { name: "교체 전 데이터 복구", exact: true }),
+  ).toBeEnabled();
+  expect(errors).toEqual([]);
+});
+
+test("복구본의 카드 하나를 현재 프로젝트·초안·복구본을 유지하며 추가한다", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await seed(page, currentForCardRecovery);
+
+  await page
+    .getByRole("button", { name: "작업 카드 추가", exact: true })
+    .click();
+  await page.getByLabel("작업 제목").fill("계속 작성할 카드 초안");
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "작성 중 카드 계속", exact: true }),
+  ).toBeVisible();
+  const draftsBefore = await storedExceptData(page);
+
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  const recoveryButton = page.getByRole("button", {
+    name: "카드 선택 복구",
+    exact: true,
+  });
+  await expect(recoveryButton).toHaveAccessibleDescription(
+    /현재 데이터·초안·복구본을 유지/,
+  );
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 844 });
+    await recoveryButton.scrollIntoViewIfNeeded();
+    expect((await recoveryButton.boundingBox())!.height).toBeGreaterThanOrEqual(
+      44,
+    );
+    expect(
+      await page
+        .getByRole("dialog")
+        .evaluate((element) => element.scrollWidth <= element.clientWidth),
+    ).toBe(true);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+  }
+  await recoveryButton.click();
+
+  const dialog = page.getByRole("dialog", {
+    name: "카드 하나만 복구할까요?",
+  });
+  const sourceProjectSelect = dialog.getByLabel("복구본 프로젝트", {
+    exact: true,
+  });
+  const sourceCardSelect = dialog.getByLabel("복구할 카드", { exact: true });
+  const destinationSelect = dialog.getByLabel("추가할 현재 프로젝트", {
+    exact: true,
+  });
+  await expect(sourceProjectSelect).toHaveValue("shared-project");
+  await expect(sourceCardSelect).toHaveValue("shared-card");
+  await expect(destinationSelect).toHaveValue("shared-project");
+  await expect(dialog).toContainText("중요한 이전 작업");
+  await expect(dialog).toContainText("진행 중");
+  await destinationSelect.selectOption("destination-project");
+  await expect(dialog).toContainText(
+    "“카드를 받을 프로젝트” 프로젝트에 선택한 카드를 새 카드로 추가",
+  );
+  const addButton = dialog.getByRole("button", {
+    name: "프로젝트에 카드 추가",
+    exact: true,
+  });
+  await expect(addButton).toHaveAccessibleDescription(
+    /카드의 상태·중요 표시·메모 이력·날짜를 보존/,
+  );
+  for (const control of [
+    sourceProjectSelect,
+    sourceCardSelect,
+    destinationSelect,
+    addButton,
+  ]) {
+    expect((await control.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  }
+  expect(
+    await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth),
+  ).toBe(true);
+
+  await addButton.click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "카드를 받을 프로젝트",
+  );
+  await expect(page.getByRole("status", { name: "작업 알림" })).toContainText(
+    "카드를 “카드를 받을 프로젝트” 프로젝트에 추가했어요",
+  );
+  expect(await storedExceptData(page)).toEqual(draftsBefore);
+
+  const stored = await page.evaluate(() =>
+    localStorage.getItem("with-ai:data:v1"),
+  );
+  const parsed = parseBackup(stored!);
+  expect(parsed.projects).toHaveLength(2);
+  expect(parsed.projects[0]).toEqual(currentForCardRecovery.projects[0]);
+  const destination = parsed.projects[1];
+  const originalDestination = currentForCardRecovery.projects[1];
+  expect(destination.id).toBe(originalDestination.id);
+  expect(destination.updatedAt).not.toBe(originalDestination.updatedAt);
+  expect(destination.cards).toHaveLength(2);
+  expect(destination.cards[1]).toEqual(originalDestination.cards[0]);
+  const restoredCard = destination.cards[0];
+  expect(restoredCard.id).not.toBe(source.cards[0].id);
+  expect({ ...restoredCard, id: source.cards[0].id }).toEqual(source.cards[0]);
+  expect(
+    new Set(
+      parsed.projects.flatMap((item) => [
+        item.id,
+        ...item.cards.map((cardItem) => cardItem.id),
+      ]),
+    ).size,
+  ).toBe(5);
+  expect(JSON.parse(stored!).importRecovery).toEqual({
+    version: 1,
+    savedAt: stamp,
+    data: recoveryData,
+  });
+
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "카드 선택 복구", exact: true }),
+  ).toBeEnabled();
   await expect(
     page.getByRole("button", { name: "프로젝트 선택 복구", exact: true }),
   ).toBeEnabled();

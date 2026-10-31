@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
   IMPORT_RECOVERY_KEY,
+  cloneRecoveryCard,
   cloneRecoveryProject,
   createImportRecovery,
   loadImportRecovery,
@@ -120,6 +121,34 @@ test("선택 복구용 프로젝트 복사본은 내용과 이력을 보존하�
   assert.notEqual(restored.cards[0].noteHistory, source.cards[0].noteHistory);
   restored.cards[0].note.done = "복사본 수정";
   assert.equal(source.cards[0].note.done, "기존 데이터");
+});
+
+test("선택 복구용 카드 복사본은 내용과 이력을 보존하고 충돌 없는 id를 만든다", () => {
+  const source = {
+    ...data.projects[0].cards[0],
+    important: true,
+    noteHistory: [
+      {
+        done: "이전 기록",
+        blocked: "",
+        next: "현재 기록",
+        updatedAt: stamp,
+      },
+    ],
+  };
+  const generated = ["current-card", source.id, "restored-card"];
+  const restored = cloneRecoveryCard(
+    source,
+    ["current-card"],
+    () => generated.shift()!,
+  );
+
+  assert.equal(restored.id, "restored-card");
+  assert.deepEqual({ ...restored, id: source.id }, source);
+  assert.notEqual(restored.note, source.note);
+  assert.notEqual(restored.noteHistory, source.noteHistory);
+  restored.note.done = "복사본 수정";
+  assert.equal(source.note.done, "기존 데이터");
 });
 
 test("이전 별도 키의 복구본은 기존 데이터 및 손상 데이터에서도 읽을 수 있다", () => {

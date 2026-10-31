@@ -1,4 +1,10 @@
-import { newId, parseBackup, type AppData, type Project } from "./model";
+import {
+  newId,
+  parseBackup,
+  type AppData,
+  type Card,
+  type Project,
+} from "./model";
 
 export const IMPORT_RECOVERY_KEY = "with-ai:import-recovery:v1";
 
@@ -12,15 +18,15 @@ interface StoredImportRecovery {
 
 export type ImportRecovery = Pick<StoredImportRecovery, "savedAt" | "data">;
 
-export function cloneRecoveryProject(
-  project: Project,
+function createRecoveryIdGenerator(
   reservedIds: Iterable<string>,
-  createId: () => string = newId,
-): Project {
+  sourceIds: Iterable<string>,
+  createId: () => string,
+  message: string,
+) {
   const usedIds = new Set(reservedIds);
-  usedIds.add(project.id);
-  project.cards.forEach((card) => usedIds.add(card.id));
-  const nextId = () => {
+  for (const id of sourceIds) usedIds.add(id);
+  return () => {
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const candidate = createId();
       if (
@@ -32,19 +38,50 @@ export function cloneRecoveryProject(
         return candidate;
       }
     }
-    throw new Error("복구할 프로젝트의 새 식별자를 만들지 못했어요.");
+    throw new Error(message);
   };
+}
+
+function cloneCard(card: Card, id: string): Card {
+  return {
+    ...card,
+    id,
+    note: { ...card.note },
+    ...(card.noteHistory
+      ? { noteHistory: card.noteHistory.map((note) => ({ ...note })) }
+      : {}),
+  };
+}
+
+export function cloneRecoveryCard(
+  card: Card,
+  reservedIds: Iterable<string>,
+  createId: () => string = newId,
+): Card {
+  const nextId = createRecoveryIdGenerator(
+    reservedIds,
+    [card.id],
+    createId,
+    "복구할 카드의 새 식별자를 만들지 못했어요.",
+  );
+  return cloneCard(card, nextId());
+}
+
+export function cloneRecoveryProject(
+  project: Project,
+  reservedIds: Iterable<string>,
+  createId: () => string = newId,
+): Project {
+  const nextId = createRecoveryIdGenerator(
+    reservedIds,
+    [project.id, ...project.cards.map((card) => card.id)],
+    createId,
+    "복구할 프로젝트의 새 식별자를 만들지 못했어요.",
+  );
   return {
     ...project,
     id: nextId(),
-    cards: project.cards.map((card) => ({
-      ...card,
-      id: nextId(),
-      note: { ...card.note },
-      ...(card.noteHistory
-        ? { noteHistory: card.noteHistory.map((note) => ({ ...note })) }
-        : {}),
-    })),
+    cards: project.cards.map((card) => cloneCard(card, nextId())),
   };
 }
 

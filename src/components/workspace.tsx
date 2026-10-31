@@ -40,6 +40,7 @@ import {
   now,
   parseBackup,
   sortCards,
+  statusLabel,
   summarize,
   updateCardNote,
 } from "@/lib/model";
@@ -50,6 +51,7 @@ import {
   type SaveOptions,
 } from "@/lib/store";
 import {
+  cloneRecoveryCard,
   cloneRecoveryProject,
   type ImportRecovery,
 } from "@/lib/import-recovery";
@@ -99,6 +101,13 @@ type Modal =
       kind: "restore-project";
       recovery: ImportRecovery;
       projectId: string;
+    }
+  | {
+      kind: "restore-card";
+      recovery: ImportRecovery;
+      sourceProjectId: string;
+      sourceCardId: string;
+      destinationProjectId: string;
     }
   | { kind: "restore-import"; recovery: ImportRecovery }
   | null;
@@ -243,6 +252,22 @@ export function Workspace() {
           (item) => item.id === modal.projectId,
         )
       : undefined;
+  const selectedRecoveryCardProject =
+    modal?.kind === "restore-card"
+      ? modal.recovery.data.projects.find(
+          (item) => item.id === modal.sourceProjectId,
+        )
+      : undefined;
+  const selectedRecoveryCard =
+    modal?.kind === "restore-card"
+      ? selectedRecoveryCardProject?.cards.find(
+          (item) => item.id === modal.sourceCardId,
+        )
+      : undefined;
+  const selectedRecoveryDestination =
+    modal?.kind === "restore-card"
+      ? data.projects.find((item) => item.id === modal.destinationProjectId)
+      : undefined;
   const currentCardCount = data.projects.reduce(
     (count, item) => count + item.cards.length,
     0,
@@ -254,6 +279,23 @@ export function Workspace() {
         ? `전체 작업 카드는 최대 ${MAX_CARDS.toLocaleString("ko-KR")}개까지 저장할 수 있어요.`
         : ""
     : "복구할 프로젝트를 다시 선택해 주세요.";
+  const recoveryCardCount =
+    importRecovery?.data.projects.reduce(
+      (count, item) => count + item.cards.length,
+      0,
+    ) ?? 0;
+  const recoveryCardLimitMessage =
+    modal?.kind !== "restore-card"
+      ? ""
+      : error
+        ? "현재 데이터를 읽을 수 없어 카드를 추가할 수 없어요."
+        : !selectedRecoveryCardProject || !selectedRecoveryCard
+          ? "복구할 카드를 다시 선택해 주세요."
+          : !selectedRecoveryDestination
+            ? "카드를 추가할 프로젝트를 다시 선택해 주세요."
+            : currentCardCount >= MAX_CARDS
+              ? `전체 작업 카드는 최대 ${MAX_CARDS.toLocaleString("ko-KR")}개까지 저장할 수 있어요.`
+              : "";
   const settingsOpen = modal?.kind === "settings";
   const currentBackup = useMemo(
     () => (settingsOpen ? createBackupPayload(data) : null),
@@ -621,6 +663,83 @@ export function Workspace() {
       )
     ) {
       selectProject(restored.id);
+    }
+  }
+  function restoreRecoveryCard(
+    recovery: ImportRecovery,
+    sourceProjectId: string,
+    sourceCardId: string,
+    destinationProjectId: string,
+  ) {
+    if (error) {
+      notify(
+        "현재 데이터를 읽을 수 없어 카드를 추가하지 않았어요. 전체 복구나 정상 백업 가져오기를 이용해 주세요.",
+        true,
+      );
+      return;
+    }
+    const sourceProject = recovery.data.projects.find(
+      (item) => item.id === sourceProjectId,
+    );
+    const source = sourceProject?.cards.find(
+      (item) => item.id === sourceCardId,
+    );
+    if (!sourceProject || !source) {
+      notify("복구할 카드를 다시 선택해 주세요.", true);
+      return;
+    }
+    const destination = data.projects.find(
+      (item) => item.id === destinationProjectId,
+    );
+    if (!destination) {
+      notify("카드를 추가할 프로젝트를 다시 선택해 주세요.", true);
+      return;
+    }
+    if (currentCardCount >= MAX_CARDS) {
+      notify(
+        `전체 작업 카드는 최대 ${MAX_CARDS.toLocaleString("ko-KR")}개까지 저장할 수 있어 추가하지 않았어요.`,
+        true,
+      );
+      return;
+    }
+    let restored: Card;
+    try {
+      restored = cloneRecoveryCard(
+        source,
+        data.projects.flatMap((item) => [
+          item.id,
+          ...item.cards.map((card) => card.id),
+        ]),
+      );
+    } catch (restoreError) {
+      notify(
+        restoreError instanceof Error
+          ? restoreError.message
+          : "카드 복사본을 만들지 못했어요.",
+        true,
+      );
+      return;
+    }
+    const stamp = now();
+    if (
+      persist(
+        {
+          ...data,
+          projects: data.projects.map((item) =>
+            item.id === destination.id
+              ? {
+                  ...item,
+                  updatedAt: stamp,
+                  cards: [restored, ...item.cards],
+                }
+              : item,
+          ),
+        },
+        `“${source.title}” 카드를 “${destination.name}” 프로젝트에 추가했어요.`,
+        { kind: "restore-card", recovery },
+      )
+    ) {
+      selectProject(destination.id);
     }
   }
   function resetAfterDataReplacement() {
@@ -1383,6 +1502,33 @@ export function Workspace() {
                 </button>
                 <button
                   className="button secondary"
+                  disabled={
+                    !!error ||
+                    data.projects.length === 0 ||
+                    recoveryCardCount === 0 ||
+                    currentCardCount >= MAX_CARDS
+                  }
+                  aria-describedby="recovery-card-help"
+                  onClick={() => {
+                    const sourceProject = importRecovery.data.projects.find(
+                      (item) => item.cards.length > 0,
+                    );
+                    const sourceCard = sourceProject?.cards[0];
+                    if (sourceProject && sourceCard && project)
+                      setModal({
+                        kind: "restore-card",
+                        recovery: importRecovery,
+                        sourceProjectId: sourceProject.id,
+                        sourceCardId: sourceCard.id,
+                        destinationProjectId: project.id,
+                      });
+                  }}
+                >
+                  <Plus size={17} />
+                  카드 선택 복구
+                </button>
+                <button
+                  className="button secondary"
                   onClick={() =>
                     setModal({ kind: "restore-import", recovery: importRecovery })
                   }
@@ -1403,6 +1549,19 @@ export function Workspace() {
                   : importRecovery.data.projects.length === 0
                     ? " 복구본에 추가할 프로젝트가 없어요."
                     : ""}
+              </small>
+              <small id="recovery-card-help">
+                카드 선택 복구는 현재 데이터·초안·복구본을 유지한 채 선택한
+                카드의 복사본만 지정한 프로젝트에 추가해요.
+                {error
+                  ? " 현재 데이터를 읽을 수 없어 전체 복구만 사용할 수 있어요."
+                  : data.projects.length === 0
+                    ? " 카드를 추가할 현재 프로젝트가 없어요."
+                    : recoveryCardCount === 0
+                      ? " 복구본에 추가할 카드가 없어요."
+                      : currentCardCount >= MAX_CARDS
+                        ? ` 전체 작업 카드는 최대 ${MAX_CARDS.toLocaleString("ko-KR")}개까지 저장할 수 있어요.`
+                        : ""}
               </small>
               <small>
                 최근 데이터 교체 직전의 확정 데이터 1개만 이 브라우저에 보관해요.
@@ -1543,6 +1702,140 @@ export function Workspace() {
               >
                 <Plus size={18} />
                 현재 데이터에 추가
+              </button>
+            </div>
+          </form>
+        </Dialog>
+      )}
+      {modal?.kind === "restore-card" && (
+        <Dialog
+          notice={notification}
+          title="카드 하나만 복구할까요?"
+          onClose={() => setModal({ kind: "settings" })}
+        >
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              restoreRecoveryCard(
+                modal.recovery,
+                modal.sourceProjectId,
+                modal.sourceCardId,
+                modal.destinationProjectId,
+              );
+            }}
+          >
+            <div className="field">
+              <label htmlFor="recovery-card-project">복구본 프로젝트</label>
+              <select
+                id="recovery-card-project"
+                value={modal.sourceProjectId}
+                data-dialog-autofocus
+                onChange={(event) => {
+                  const sourceProject = modal.recovery.data.projects.find(
+                    (item) => item.id === event.target.value,
+                  );
+                  setModal({
+                    kind: "restore-card",
+                    recovery: modal.recovery,
+                    sourceProjectId: event.target.value,
+                    sourceCardId: sourceProject?.cards[0]?.id ?? "",
+                    destinationProjectId: modal.destinationProjectId,
+                  });
+                }}
+              >
+                {modal.recovery.data.projects
+                  .filter((item) => item.cards.length > 0)
+                  .map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} · 작업 카드 {item.cards.length}개
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="recovery-card">복구할 카드</label>
+              <select
+                id="recovery-card"
+                value={modal.sourceCardId}
+                onChange={(event) =>
+                  setModal({
+                    ...modal,
+                    sourceCardId: event.target.value,
+                  })
+                }
+              >
+                {selectedRecoveryCardProject?.cards.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="recovery-card-destination">
+                추가할 현재 프로젝트
+              </label>
+              <select
+                id="recovery-card-destination"
+                value={modal.destinationProjectId}
+                onChange={(event) =>
+                  setModal({
+                    ...modal,
+                    destinationProjectId: event.target.value,
+                  })
+                }
+              >
+                {data.projects.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} · 작업 카드 {item.cards.length}개
+                  </option>
+                ))}
+              </select>
+            </div>
+            {selectedRecoveryCard && selectedRecoveryCardProject && (
+              <p className="confirm-copy restore-project-summary">
+                <strong className="break-all">
+                  {selectedRecoveryCard.title}
+                </strong>
+                <br />
+                {selectedRecoveryCardProject.name} ·{" "}
+                {statusLabel(selectedRecoveryCard.status)} · 마지막 수정{" "}
+                {formatDate(selectedRecoveryCard.updatedAt)}
+              </p>
+            )}
+            <div className="restore-project-info" id="restore-card-help">
+              {selectedRecoveryDestination ? (
+                <>
+                  “{selectedRecoveryDestination.name}” 프로젝트에 선택한 카드를 새
+                  카드로 추가해요.{" "}
+                </>
+              ) : (
+                <>선택한 카드를 현재 프로젝트에 새 카드로 추가해요. </>
+              )}
+              현재 프로젝트와 작성 중인 초안은 그대로 두고 카드의 상태·중요
+              표시·메모 이력·날짜를 보존하며, 원본 복구 지점도 계속 남아요.
+            </div>
+            {recoveryCardLimitMessage && (
+              <p className="field-error restore-project-limit" role="alert">
+                {recoveryCardLimitMessage}
+              </p>
+            )}
+            <div className="form-actions">
+              <button
+                type="button"
+                className="button secondary"
+                onClick={() => setModal({ kind: "settings" })}
+              >
+                취소
+              </button>
+              <button
+                className="button primary"
+                type="submit"
+                disabled={!!recoveryCardLimitMessage}
+                aria-describedby="restore-card-help"
+              >
+                <Plus size={18} />
+                프로젝트에 카드 추가
               </button>
             </div>
           </form>

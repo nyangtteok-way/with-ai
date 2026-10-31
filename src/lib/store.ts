@@ -20,7 +20,8 @@ export type SaveOptions =
   | { kind?: "edit" }
   | { kind: "import" }
   | { kind: "restore"; recovery: ImportRecovery }
-  | { kind: "restore-project"; recovery: ImportRecovery };
+  | { kind: "restore-project"; recovery: ImportRecovery }
+  | { kind: "restore-card"; recovery: ImportRecovery };
 const serverSnapshot: Snapshot = {
   data: EMPTY_DATA,
   ready: false,
@@ -102,7 +103,11 @@ export function saveData(
       };
     }
     let importRecovery = loadImportRecovery(raw);
-    if (options.kind === "restore" || options.kind === "restore-project") {
+    if (
+      options.kind === "restore" ||
+      options.kind === "restore-project" ||
+      options.kind === "restore-card"
+    ) {
       if (
         !importRecovery ||
         JSON.stringify(importRecovery) !== JSON.stringify(options.recovery)
