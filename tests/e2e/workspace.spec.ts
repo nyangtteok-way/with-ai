@@ -359,13 +359,32 @@ test("백업 교체 전 데이터를 자동 보관하고 설정에서 복구한�
       localStorage.getItem("with-ai:import-recovery:v1"),
     ),
   ).toBeNull();
-  expect(
-    await page.evaluate(() => JSON.parse(localStorage.getItem("with-ai:data:v1")!).importRecovery),
-  ).toBeNull();
+  const recoveryAfterRestore = await page.evaluate(
+    () => JSON.parse(localStorage.getItem("with-ai:data:v1")!).importRecovery,
+  );
+  expect(recoveryAfterRestore.data).toEqual(imported);
   await page.reload();
   await expect(
     page.getByRole("heading", { level: 1, name: "모바일 실험" }),
   ).toBeVisible();
+
+  await page.getByRole("button", { name: "설정", exact: true }).click();
+  await expect(page.locator(".import-recovery")).toContainText(
+    "복구 직전의 확정 데이터",
+  );
+  await page
+    .getByRole("button", { name: "교체 전 데이터 복구", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "교체 전 데이터 복구", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "가져온 프로젝트" }),
+  ).toBeVisible();
+  const recoveryAfterUndo = await page.evaluate(
+    () => JSON.parse(localStorage.getItem("with-ai:data:v1")!).importRecovery,
+  );
+  expect(recoveryAfterUndo.data).toEqual(parseBackup(beforeImport!));
 
   const beforeBlockedImport = await page.evaluate(() =>
     localStorage.getItem("with-ai:data:v1"),
@@ -390,7 +409,7 @@ test("백업 교체 전 데이터를 자동 보관하고 설정에서 복구한�
     await page.evaluate(() => localStorage.getItem("with-ai:data:v1")),
   ).toBe(beforeBlockedImport);
   await expect(
-    page.getByRole("heading", { level: 1, name: "모바일 실험" }),
+    page.getByRole("heading", { level: 1, name: "가져온 프로젝트" }),
   ).toBeVisible();
 });
 test("입력 오류, 잘못된 백업, 복사 실패 및 직접 선택", async ({ page }) => {

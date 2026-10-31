@@ -115,7 +115,14 @@ export function saveData(
             "복구 지점이 바뀌었어요. 설정에서 최신 복구 지점을 다시 확인해 주세요.",
         };
       }
-      if (options.kind === "restore") importRecovery = null;
+      if (options.kind === "restore") {
+        // Keep a full restore reversible without changing the single recovery
+        // slot: the data being replaced becomes the next recovery point. When
+        // the current payload is unreadable there is no validated data to keep.
+        importRecovery = snapshot.error
+          ? null
+          : createImportRecovery(snapshot.data);
+      }
     } else if (options.kind === "import" && !snapshot.error) {
       importRecovery = createImportRecovery(snapshot.data);
     }

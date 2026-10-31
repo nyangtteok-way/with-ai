@@ -1405,8 +1405,9 @@ export function Workspace() {
                     : ""}
               </small>
               <small>
-                최근 JSON 가져오기 직전의 확정 데이터 1개만 이 브라우저에
-                보관해요. 저장하지 않은 초안은 포함하지 않아요.
+                최근 데이터 교체 직전의 확정 데이터 1개만 이 브라우저에 보관해요.
+                저장하지 않은 초안은 포함하지 않아요. 전체 복구를 하면
+                복구 직전의 확정 데이터가 이 자리로 이동해 다시 되돌릴 수 있어요.
               </small>
             </div>
           )}
@@ -1567,8 +1568,9 @@ export function Workspace() {
           </p>
           <div className="import-warning">
             현재 프로젝트 {data.projects.length}개와 모든 카드·메모를 교체하고
-            저장하지 않은 초안을 정리해요. 현재 데이터도 필요하면 먼저 JSON으로
-            내보내 주세요.
+            저장하지 않은 초안을 정리해요. {error
+              ? "읽을 수 없는 현재 데이터는 복구 지점으로 보관할 수 없어요."
+              : "현재 확정 데이터는 이 복구 지점에 자동 보관되어 한 번 더 되돌릴 수 있어요."}
           </div>
           <div className="form-actions">
             <button
@@ -1583,7 +1585,9 @@ export function Workspace() {
                 if (
                   persist(
                     modal.recovery.data,
-                    "교체 전 데이터를 복구했어요.",
+                    error
+                      ? "교체 전 데이터를 복구했어요."
+                      : "교체 전 데이터를 복구했고, 복구 직전 데이터도 보관했어요.",
                     { kind: "restore", recovery: modal.recovery },
                   )
                 ) {

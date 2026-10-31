@@ -92,7 +92,7 @@ test("가져오기 실패는 기존 본문과 이전 복구본을 바꾸지 않�
   assert.equal(storage.getItem(IMPORT_RECOVERY_KEY), null);
 });
 
-test("새 저장 형식에서도 일반 편집과 실패한 가져오기·복구가 복구본을 유지한다", (t) => {
+test("전체 복구는 교체 직전 데이터를 새 복구 지점으로 맞바꾼다", (t) => {
   const { storage, controls } = setup(
     t,
     serializeStoredData(current, recovery),
@@ -107,8 +107,13 @@ test("새 저장 형식에서도 일반 편집과 실패한 가져오기·복구
   controls.failWrite = "";
   assert.equal(saveData(previous, { kind: "restore", recovery }).ok, true);
   retryLoad();
-  assert.deepEqual(parseBackup(storage.getItem(STORAGE_KEY)!), previous);
-  assert.equal(loadImportRecovery(storage.getItem(STORAGE_KEY), storage), null);
+  const stored = storage.getItem(STORAGE_KEY)!;
+  assert.deepEqual(parseBackup(stored), previous);
+  assert.deepEqual(loadImportRecovery(stored, storage)?.data, next);
+  assert.notEqual(
+    loadImportRecovery(stored, storage)?.savedAt,
+    recovery.savedAt,
+  );
 });
 
 test("프로젝트 선택 복구는 현재 데이터에 합치고 복구 지점은 그대로 유지한다", (t) => {
@@ -165,7 +170,7 @@ test("확인 중 복구 지점이 바뀌면 오래된 복구 확인으로 덮어
   );
 });
 
-test("기존 복구본 정리가 실패해도 복구 성공 후 오래된 복구본이 되살아나지 않는다", (t) => {
+test("기존 복구본 정리가 실패해도 전체 복구 뒤 새 복구 지점만 유지한다", (t) => {
   const { storage, controls } = setup(t);
   controls.failRemove = true;
   assert.equal(saveData(next).ok, true);
@@ -176,9 +181,23 @@ test("기존 복구본 정리가 실패해도 복구 성공 후 오래된 복구
   assert.equal(saveData(previous, { kind: "restore", recovery }).ok, true);
   assert.equal(storage.getItem(IMPORT_RECOVERY_KEY), legacyRaw);
   retryLoad();
-  assert.equal(loadImportRecovery(storage.getItem(STORAGE_KEY), storage), null);
+  assert.deepEqual(
+    loadImportRecovery(storage.getItem(STORAGE_KEY), storage)?.data,
+    next,
+  );
   assert.equal(saveData(current).ok, true);
-  assert.equal(loadImportRecovery(storage.getItem(STORAGE_KEY), storage), null);
+  assert.deepEqual(
+    loadImportRecovery(storage.getItem(STORAGE_KEY), storage)?.data,
+    next,
+  );
+});
+
+test("손상된 본문을 전체 복구할 때는 검증할 수 없는 현재 데이터를 보관하지 않는다", (t) => {
+  const { storage } = setup(t, "broken-json");
+  assert.equal(saveData(previous, { kind: "restore", recovery }).ok, true);
+  const stored = storage.getItem(STORAGE_KEY)!;
+  assert.deepEqual(parseBackup(stored), previous);
+  assert.equal(loadImportRecovery(stored, storage), null);
 });
 
 test("손상된 본문을 백업으로 복구할 때 기존 복구본을 빈 데이터로 덮지 않는다", (t) => {

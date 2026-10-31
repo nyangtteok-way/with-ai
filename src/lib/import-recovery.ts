@@ -83,7 +83,8 @@ export function loadImportRecovery(
   storage?: StorageLike,
 ): ImportRecovery | null {
   // An explicit null prevents an old, separately stored recovery from returning
-  // after a restore, even if removing that legacy key was denied.
+  // after recovery is intentionally cleared, even if removing that legacy key
+  // was denied.
   try {
     const value: unknown = rawData === null ? null : JSON.parse(rawData);
     if (isRecord(value) && Object.hasOwn(value, "importRecovery"))

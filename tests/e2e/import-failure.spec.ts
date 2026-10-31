@@ -179,7 +179,25 @@ test("연속 가져오기 실패·재시도와 복구 실패에서 확정 데이
   );
   await page.reload();
   await page.getByRole("button", { name: "설정", exact: true }).click();
-  await expect(page.locator(".import-recovery")).toHaveCount(0);
+  await expect(page.locator(".import-recovery")).toContainText(
+    "복구 직전의 확정 데이터",
+  );
+  expect(
+    await page.evaluate(
+      () =>
+        JSON.parse(localStorage.getItem("with-ai:data:v1")!).importRecovery
+          .data,
+    ),
+  ).toEqual(projectData("셋째 프로젝트"));
+  await page
+    .getByRole("button", { name: "교체 전 데이터 복구", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "교체 전 데이터 복구", exact: true })
+    .click();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "셋째 프로젝트",
+  );
 });
 
 test("다른 탭에서 가져오면 복구 목록이 갱신되고 오래된 복구 확인은 거절한다", async ({
