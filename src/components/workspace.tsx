@@ -56,6 +56,12 @@ import {
   type ImportRecovery,
 } from "@/lib/import-recovery";
 import {
+  resetInitialActiveProjectId,
+  resolveActiveProjectId,
+  saveActiveProjectId,
+  useInitialActiveProjectId,
+} from "@/lib/project-selection";
+import {
   hasCardFormDraft,
   hasPromptDraft,
   hasProjectFormDraft,
@@ -165,7 +171,8 @@ function BackupSize({ bytes }: { bytes: number }) {
 }
 export function Workspace() {
   const { data, ready, error, importRecovery } = useAppStore();
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const initialActiveId = useInitialActiveProjectId();
+  const [selectedActiveId, setSelectedActiveId] = useState<string | null>(null);
   const [filter, setFilter] = useState<Status | "all">("all");
   const [cardSort, setCardSort] = useState<CardSort>("default");
   const [search, setSearch] = useState("");
@@ -179,6 +186,10 @@ export function Workspace() {
   );
   const fileRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const activeId = resolveActiveProjectId(
+    data.projects,
+    selectedActiveId ?? initialActiveId,
+  );
   const project =
     data.projects.find((p) => p.id === activeId) ?? data.projects[0];
   const draftIndicators = useMemo(
@@ -353,7 +364,8 @@ export function Workspace() {
     return true;
   }
   function selectProject(id: string) {
-    setActiveId(id);
+    setSelectedActiveId(id);
+    saveActiveProjectId(id);
     setFilter("all");
     setSearch("");
     setModal(null);
@@ -540,6 +552,11 @@ export function Workspace() {
         removeProjectCardFormDrafts(removed.id);
         removeProjectPromptDrafts(removed.id);
         removeProjectFormDraft(removed.id);
+      }
+      if (activeId === id) {
+        const fallbackId = data.projects.find((p) => p.id !== id)?.id ?? null;
+        setSelectedActiveId(fallbackId);
+        saveActiveProjectId(fallbackId);
       }
       setModal(null);
       setFilter("all");
@@ -747,7 +764,9 @@ export function Workspace() {
     removeAllCardFormDrafts();
     removeAllPromptDrafts();
     removeAllProjectFormDrafts();
-    setActiveId(null);
+    resetInitialActiveProjectId();
+    setSelectedActiveId(null);
+    saveActiveProjectId(null);
     setFilter("all");
     setSearch("");
     setModal(null);

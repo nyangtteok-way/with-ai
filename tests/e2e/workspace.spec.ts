@@ -29,6 +29,108 @@ async function openCard(page: Page, title: string) {
     .filter({ has: page.getByRole("heading", { name: title, exact: true }) })
     .click();
 }
+test("마지막으로 선택한 프로젝트를 다시 열고 다른 탭의 선택은 현재 편집을 바꾸지 않는다", async ({
+  page,
+  context,
+}) => {
+  await newProject(page);
+  await page
+    .getByRole("navigation", { name: "주요 작업" })
+    .getByRole("button", { name: "프로젝트", exact: true })
+    .click();
+  await page
+    .getByRole("dialog", { name: "내 프로젝트" })
+    .locator(".add-project")
+    .click();
+  await page.getByLabel("프로젝트 이름").fill("이어갈 프로젝트");
+  await page.getByLabel("프로젝트 설명").fill("다시 열어도 이곳부터 확인");
+  await page
+    .getByRole("dialog", { name: "새 프로젝트" })
+    .getByRole("button", { name: "프로젝트 만들기", exact: true })
+    .click();
+
+  const storedData = await page.evaluate(() =>
+    localStorage.getItem("with-ai:data:v1"),
+  );
+  const selectedId = await page.evaluate(() => {
+    const data = JSON.parse(localStorage.getItem("with-ai:data:v1")!);
+    return data.projects.find(
+      (project: { name: string }) => project.name === "이어갈 프로젝트",
+    ).id;
+  });
+  await expect(
+    page.getByRole("heading", { name: "이어갈 프로젝트", exact: true }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() =>
+      localStorage.getItem("with-ai:active-project:v1"),
+    ),
+  ).toBe(selectedId);
+
+  await page.reload();
+
+  await expect(
+    page.getByRole("heading", { name: "이어갈 프로젝트", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", {
+      name: "프로젝트 선택, 현재 이어갈 프로젝트",
+      exact: true,
+    }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => localStorage.getItem("with-ai:data:v1")),
+  ).toBe(storedData);
+
+  await page
+    .getByRole("button", { name: "작업 카드 추가", exact: true })
+    .click();
+  await page.getByLabel("작업 제목").fill("현재 탭에서 작성 중");
+  const otherPage = await context.newPage();
+  await otherPage.goto("/");
+  await otherPage
+    .getByRole("button", {
+      name: "프로젝트 선택, 현재 이어갈 프로젝트",
+      exact: true,
+    })
+    .click();
+  await otherPage
+    .getByRole("dialog", { name: "내 프로젝트" })
+    .locator(".project-nav")
+    .filter({ hasText: "모바일 실험" })
+    .click();
+  await expect(page.getByLabel("작업 제목")).toHaveValue(
+    "현재 탭에서 작성 중",
+  );
+  await expect(
+    page.getByRole("dialog", { name: "새 작업 카드" }),
+  ).toContainText("이어갈 프로젝트");
+  await otherPage.close();
+  await page
+    .getByRole("dialog", { name: "새 작업 카드" })
+    .getByRole("button", { name: "닫기", exact: true })
+    .click();
+  await page
+    .getByRole("dialog", { name: "작성 중인 내용을 버릴까요?" })
+    .getByRole("button", { name: "버리고 이동", exact: true })
+    .click();
+
+  await page
+    .getByRole("button", {
+      name: "프로젝트 선택, 현재 이어갈 프로젝트",
+      exact: true,
+    })
+    .click();
+  await page
+    .getByRole("dialog", { name: "내 프로젝트" })
+    .locator(".project-nav")
+    .filter({ hasText: "모바일 실험" })
+    .click();
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "모바일 실험", exact: true }),
+  ).toBeVisible();
+});
 test("카드 검색은 내용·메모·상태를 함께 찾고 저장 데이터와 진행률을 유지한다", async ({
   page,
 }) => {

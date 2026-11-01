@@ -112,7 +112,11 @@ async function storedExceptData(page: Page) {
   return page.evaluate(() =>
     Object.fromEntries(
       Object.keys(localStorage)
-        .filter((key) => key !== "with-ai:data:v1")
+        .filter(
+          (key) =>
+            key !== "with-ai:data:v1" &&
+            key !== "with-ai:active-project:v1",
+        )
         .sort()
         .map((key) => [key, localStorage.getItem(key)]),
     ),
