@@ -62,6 +62,11 @@ import {
   useInitialActiveProjectId,
 } from "@/lib/project-selection";
 import {
+  parseCardSort,
+  saveCardSort,
+  useInitialCardSort,
+} from "@/lib/card-sort-preference";
+import {
   hasCardFormDraft,
   hasPromptDraft,
   hasProjectFormDraft,
@@ -172,9 +177,13 @@ function BackupSize({ bytes }: { bytes: number }) {
 export function Workspace() {
   const { data, ready, error, importRecovery } = useAppStore();
   const initialActiveId = useInitialActiveProjectId();
+  const initialCardSort = useInitialCardSort();
   const [selectedActiveId, setSelectedActiveId] = useState<string | null>(null);
   const [filter, setFilter] = useState<Status | "all">("all");
-  const [cardSort, setCardSort] = useState<CardSort>("default");
+  const [selectedCardSort, setSelectedCardSort] = useState<CardSort | null>(
+    null,
+  );
+  const cardSort = selectedCardSort ?? initialCardSort;
   const [search, setSearch] = useState("");
   const [modal, setModal] = useState<Modal>(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
@@ -1089,9 +1098,11 @@ export function Workspace() {
                   <select
                     id="card-sort"
                     value={cardSort}
-                    onChange={(event) =>
-                      setCardSort(event.target.value as CardSort)
-                    }
+                    onChange={(event) => {
+                      const nextSort = parseCardSort(event.target.value);
+                      setSelectedCardSort(nextSort);
+                      saveCardSort(nextSort);
+                    }}
                   >
                     <option value="default">기본 순서</option>
                     <option value="important">중요 작업 먼저</option>

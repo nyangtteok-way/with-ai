@@ -175,8 +175,9 @@ test("카드 검색은 내용·메모·상태를 함께 찾고 저장 데이터�
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
   }
 });
-test("중요 작업 표시를 저장하고 모바일 목록에서 선택 정렬한다", async ({
+test("중요 작업 표시와 선택한 정렬을 저장하고 모바일 목록에 복원한다", async ({
   page,
+  context,
 }) => {
   await newProject(page);
   await newCard(page, "먼저 볼 작업");
@@ -210,12 +211,37 @@ test("중요 작업 표시를 저장하고 모바일 목록에서 선택 정렬�
   await sort.selectOption("important");
   await expect(page.locator(".task-card h3").first()).toHaveText("먼저 볼 작업");
   expect(
+    await page.evaluate(() => localStorage.getItem("with-ai:card-sort:v1")),
+  ).toBe("important");
+  expect(
     await page.evaluate(() => localStorage.getItem("with-ai:data:v1")),
   ).toBe(storedBeforeSort);
 
   await page.reload();
-  await expect(sort).toHaveValue("default");
+  await expect(sort).toHaveValue("important");
+  await expect(page.locator(".task-card h3").first()).toHaveText("먼저 볼 작업");
   await expect(importantCard.getByText("중요", { exact: true })).toBeVisible();
+  expect(
+    await page.evaluate(() => localStorage.getItem("with-ai:data:v1")),
+  ).toBe(storedBeforeSort);
+
+  const otherPage = await context.newPage();
+  await otherPage.goto("/");
+  await expect(
+    otherPage.getByLabel("작업 정렬", { exact: true }),
+  ).toHaveValue("important");
+  await otherPage
+    .getByLabel("작업 정렬", { exact: true })
+    .selectOption("recent");
+  await expect(sort).toHaveValue("important");
+  await expect(page.locator(".task-card h3").first()).toHaveText("먼저 볼 작업");
+  await otherPage.close();
+
+  await page.evaluate(() =>
+    localStorage.setItem("with-ai:card-sort:v1", "지원하지 않는 정렬"),
+  );
+  await page.reload();
+  await expect(sort).toHaveValue("default");
   const stored = JSON.parse(
     (await page.evaluate(() => localStorage.getItem("with-ai:data:v1")))!,
   );
