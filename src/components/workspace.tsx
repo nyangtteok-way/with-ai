@@ -67,6 +67,10 @@ import {
   useInitialCardSort,
 } from "@/lib/card-sort-preference";
 import {
+  restoreDeletion,
+  type DeletionUndo,
+} from "@/lib/deletion-undo";
+import {
   hasCardFormDraft,
   hasPromptDraft,
   hasProjectFormDraft,
@@ -190,9 +194,11 @@ export function Workspace() {
   const discardUnsavedRef = useRef<(() => boolean) | null>(null);
   const [draftRevision, setDraftRevision] = useState(0);
   const [pendingModal, setPendingModal] = useState<{ next: Modal } | null>(null);
-  const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(
-    null,
-  );
+  const [toast, setToast] = useState<{
+    text: string;
+    error?: boolean;
+    undo?: DeletionUndo;
+  } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const activeId = resolveActiveProjectId(
@@ -549,19 +555,22 @@ export function Workspace() {
     );
   }
   function removeProject(id: string) {
+    const index = data.projects.findIndex((item) => item.id === id);
+    const removed = data.projects[index];
+    if (!removed) {
+      notify("프로젝트가 이미 삭제되었어요. 목록을 다시 확인해 주세요.", true);
+      return;
+    }
     if (
       persist(
         { ...data, projects: data.projects.filter((p) => p.id !== id) },
         "프로젝트와 작업 카드를 삭제했어요.",
       )
     ) {
-      const removed = data.projects.find((p) => p.id === id);
-      if (removed) {
-        removeProjectProgressNoteDrafts(removed);
-        removeProjectCardFormDrafts(removed.id);
-        removeProjectPromptDrafts(removed.id);
-        removeProjectFormDraft(removed.id);
-      }
+      removeProjectProgressNoteDrafts(removed);
+      removeProjectCardFormDrafts(removed.id);
+      removeProjectPromptDrafts(removed.id);
+      removeProjectFormDraft(removed.id);
       if (activeId === id) {
         const fallbackId = data.projects.find((p) => p.id !== id)?.id ?? null;
         setSelectedActiveId(fallbackId);
@@ -570,11 +579,21 @@ export function Workspace() {
       setModal(null);
       setFilter("all");
       setSearch("");
+      setToast({
+        text: "프로젝트와 저장한 작업을 삭제했어요.",
+        undo: { kind: "project", project: removed, index },
+      });
     }
   }
   function removeCard(id: string) {
+    if (!project) return;
+    const index = project.cards.findIndex((item) => item.id === id);
+    const removed = project.cards[index];
+    if (!removed) {
+      notify("카드가 이미 삭제되었어요. 목록을 다시 확인해 주세요.", true);
+      return;
+    }
     if (
-      project &&
       updateProject(
         {
           ...project,
@@ -588,7 +607,30 @@ export function Workspace() {
       removeCardFormDraft(project.id, id);
       removePromptDraft(project.id, id);
       setModal(null);
+      setToast({
+        text: "카드와 저장한 진행 메모를 삭제했어요.",
+        undo: { kind: "card", projectId: project.id, card: removed, index },
+      });
     }
+  }
+  function undoDeletion(undo: DeletionUndo) {
+    const restored = restoreDeletion(data, undo, now());
+    if (!restored.ok) {
+      notify(restored.message, true);
+      return;
+    }
+    const result = saveData(restored.data);
+    if (!result.ok) {
+      setToast({ text: result.message, error: true, undo });
+      return;
+    }
+    setToast({
+      text:
+        undo.kind === "project"
+          ? "삭제한 프로젝트와 저장 데이터를 되돌렸어요."
+          : "삭제한 카드와 저장한 진행 메모를 되돌렸어요.",
+    });
+    selectProject(restored.projectId);
   }
   async function importFile(file?: File) {
     if (!file) return;
@@ -791,7 +833,19 @@ export function Workspace() {
         {toast.error ? <CircleDashed size={18} /> : <Check size={18} />}
       </span>
       <p>{toast.text}</p>
-      <button aria-label="알림 닫기" onClick={() => setToast(null)}>
+      {toast.undo && (
+        <button
+          className="toast-action"
+          onClick={() => undoDeletion(toast.undo!)}
+        >
+          되돌리기
+        </button>
+      )}
+      <button
+        className="toast-close"
+        aria-label="알림 닫기"
+        onClick={() => setToast(null)}
+      >
         <X size={18} />
       </button>
     </div>
@@ -1393,8 +1447,9 @@ export function Workspace() {
             <strong>
               {data.projects.find((p) => p.id === modal.projectId)?.name}
             </strong>
-            의 모든 작업 카드와 진행 메모가 함께 삭제돼요. 삭제 후에는 되돌릴 수
-            없어요.
+            의 모든 작업 카드와 진행 메모가 함께 삭제돼요. 삭제 직후 알림에서
+            저장한 데이터는 되돌릴 수 있지만, 알림을 닫거나 새로고침하면 복구할
+            수 없어요. 작성 중 초안은 되돌아오지 않아요.
           </p>
           <div className="form-actions">
             <button className="button secondary" onClick={() => setModal(null)}>
@@ -1416,7 +1471,9 @@ export function Workspace() {
           onClose={() => setModal(null)}
         >
           <p className="confirm-copy">
-            작업 카드와 진행 메모가 함께 삭제돼요. 삭제 후에는 되돌릴 수 없어요.
+            작업 카드와 진행 메모가 함께 삭제돼요. 삭제 직후 알림에서 저장한
+            데이터는 되돌릴 수 있지만, 알림을 닫거나 새로고침하면 복구할 수
+            없어요. 작성 중 초안은 되돌아오지 않아요.
           </p>
           <div className="form-actions">
             <button

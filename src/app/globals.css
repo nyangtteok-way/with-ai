@@ -1581,7 +1581,11 @@ input[aria-invalid="true"] {
   display: flex;
   color: #a7d5bf;
 }
-.toast button {
+.toast p {
+  min-width: 0;
+  margin: 0;
+}
+.toast .toast-close {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1594,6 +1598,23 @@ input[aria-invalid="true"] {
   padding: 0;
   color: #c3cad4;
   margin: -9px -9px -9px 1px;
+}
+.toast .toast-action {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid #687381;
+  border-radius: 8px;
+  background: #424d5a;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 11px;
+  margin: -9px 0;
+  white-space: nowrap;
+}
+.toast-error .toast-action {
+  border-color: #f4b7bf;
+  background: #7e2e38;
 }
 .toast-error {
   background: #963a43;
