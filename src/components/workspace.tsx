@@ -67,7 +67,10 @@ import {
   useInitialCardSort,
 } from "@/lib/card-sort-preference";
 import {
+  loadDeletionUndo,
+  removeDeletionUndo,
   restoreDeletion,
+  saveDeletionUndo,
   type DeletionUndo,
 } from "@/lib/deletion-undo";
 import {
@@ -126,6 +129,39 @@ type Modal =
     }
   | { kind: "restore-import"; recovery: ImportRecovery }
   | null;
+type ToastState = {
+  text: string;
+  error?: boolean;
+  undo?: DeletionUndo;
+};
+function deletionToast(
+  undo: DeletionUndo,
+  options: { resumed?: boolean; saved?: boolean } = {},
+): ToastState {
+  if (options.resumed)
+    return {
+      text:
+        undo.kind === "project"
+          ? "새로고침 전에 삭제한 프로젝트와 저장 데이터를 되돌릴 수 있어요."
+          : "새로고침 전에 삭제한 카드와 저장한 진행 메모를 되돌릴 수 있어요.",
+      undo,
+    };
+  if (options.saved)
+    return {
+      text:
+        undo.kind === "project"
+          ? "프로젝트와 저장한 작업을 삭제했어요. 같은 탭에서는 새로고침해도 되돌릴 수 있어요."
+          : "카드와 저장한 진행 메모를 삭제했어요. 같은 탭에서는 새로고침해도 되돌릴 수 있어요.",
+      undo,
+    };
+  return {
+    text:
+      undo.kind === "project"
+        ? "프로젝트와 저장한 작업을 삭제했어요. 지금 화면에서만 되돌릴 수 있어요."
+        : "카드와 저장한 진행 메모를 삭제했어요. 지금 화면에서만 되돌릴 수 있어요.",
+    undo,
+  };
+}
 function download(text: string, filename: string) {
   const url = URL.createObjectURL(
     new Blob([text], { type: "application/json" }),
@@ -194,11 +230,11 @@ export function Workspace() {
   const discardUnsavedRef = useRef<(() => boolean) | null>(null);
   const [draftRevision, setDraftRevision] = useState(0);
   const [pendingModal, setPendingModal] = useState<{ next: Modal } | null>(null);
-  const [toast, setToast] = useState<{
-    text: string;
-    error?: boolean;
-    undo?: DeletionUndo;
-  } | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(() => {
+    if (typeof window === "undefined") return null;
+    const undo = loadDeletionUndo();
+    return undo ? deletionToast(undo, { resumed: true }) : null;
+  });
   const fileRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const activeId = resolveActiveProjectId(
@@ -367,6 +403,7 @@ export function Workspace() {
     }
   }
   function notify(text: string, error = false) {
+    removeDeletionUndo();
     setToast({ text, error });
   }
   function persist(next: AppData, message: string, options: SaveOptions = {}) {
@@ -579,10 +616,12 @@ export function Workspace() {
       setModal(null);
       setFilter("all");
       setSearch("");
-      setToast({
-        text: "프로젝트와 저장한 작업을 삭제했어요.",
-        undo: { kind: "project", project: removed, index },
-      });
+      const undo: DeletionUndo = {
+        kind: "project",
+        project: removed,
+        index,
+      };
+      setToast(deletionToast(undo, { saved: saveDeletionUndo(undo) }));
     }
   }
   function removeCard(id: string) {
@@ -607,10 +646,13 @@ export function Workspace() {
       removeCardFormDraft(project.id, id);
       removePromptDraft(project.id, id);
       setModal(null);
-      setToast({
-        text: "카드와 저장한 진행 메모를 삭제했어요.",
-        undo: { kind: "card", projectId: project.id, card: removed, index },
-      });
+      const undo: DeletionUndo = {
+        kind: "card",
+        projectId: project.id,
+        card: removed,
+        index,
+      };
+      setToast(deletionToast(undo, { saved: saveDeletionUndo(undo) }));
     }
   }
   function undoDeletion(undo: DeletionUndo) {
@@ -624,6 +666,7 @@ export function Workspace() {
       setToast({ text: result.message, error: true, undo });
       return;
     }
+    removeDeletionUndo();
     setToast({
       text:
         undo.kind === "project"
@@ -844,7 +887,10 @@ export function Workspace() {
       <button
         className="toast-close"
         aria-label="알림 닫기"
-        onClick={() => setToast(null)}
+        onClick={() => {
+          if (toast.undo) removeDeletionUndo();
+          setToast(null);
+        }}
       >
         <X size={18} />
       </button>
@@ -1448,8 +1494,9 @@ export function Workspace() {
               {data.projects.find((p) => p.id === modal.projectId)?.name}
             </strong>
             의 모든 작업 카드와 진행 메모가 함께 삭제돼요. 삭제 직후 알림에서
-            저장한 데이터는 되돌릴 수 있지만, 알림을 닫거나 새로고침하면 복구할
-            수 없어요. 작성 중 초안은 되돌아오지 않아요.
+            저장한 데이터는 되돌릴 수 있고, 같은 탭에서는 새로고침 뒤에도 한 번
+            이어서 사용할 수 있어요. 알림이나 탭을 닫으면 복구할 수 없고 작성 중
+            초안은 되돌아오지 않아요.
           </p>
           <div className="form-actions">
             <button className="button secondary" onClick={() => setModal(null)}>
@@ -1472,8 +1519,9 @@ export function Workspace() {
         >
           <p className="confirm-copy">
             작업 카드와 진행 메모가 함께 삭제돼요. 삭제 직후 알림에서 저장한
-            데이터는 되돌릴 수 있지만, 알림을 닫거나 새로고침하면 복구할 수
-            없어요. 작성 중 초안은 되돌아오지 않아요.
+            데이터는 되돌릴 수 있고, 같은 탭에서는 새로고침 뒤에도 한 번 이어서
+            사용할 수 있어요. 알림이나 탭을 닫으면 복구할 수 없고 작성 중 초안은
+            되돌아오지 않아요.
           </p>
           <div className="form-actions">
             <button

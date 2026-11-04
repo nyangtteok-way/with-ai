@@ -46,6 +46,14 @@ test("삭제한 카드와 프로젝트의 저장 데이터를 직후 되돌린�
   const undo = page.getByRole("button", { name: "되돌리기", exact: true });
   await expect(undo).toBeVisible();
   expect((await undo.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect(
+    await page.evaluate(() =>
+      sessionStorage.getItem("with-ai:deletion-undo:v1"),
+    ),
+  ).not.toBeNull();
+  await page.reload();
+  await expect(undo).toBeVisible();
+  await expect(page.locator(".toast")).toContainText("새로고침 전에 삭제한");
   await undo.click();
   await expect(
     page.getByRole("heading", { name: "되돌릴 작업", exact: true }),
@@ -55,6 +63,11 @@ test("삭제한 카드와 프로젝트의 저장 데이터를 직후 되돌린�
     return data.projects[0].cards[0];
   });
   expect(afterCardUndo).toEqual(beforeCardDelete);
+  expect(
+    await page.evaluate(() =>
+      sessionStorage.getItem("with-ai:deletion-undo:v1"),
+    ),
+  ).toBeNull();
 
   await page.locator(".task-card").click();
   await expect(page.getByLabel("한 일", { exact: true })).toHaveValue(
@@ -91,6 +104,9 @@ test("삭제한 카드와 프로젝트의 저장 데이터를 직후 되돌린�
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(width);
   }
+  await page.reload();
+  await expect(undo).toBeVisible();
+  await expect(page.locator(".toast")).toContainText("새로고침 전에 삭제한");
   await undo.click();
   await expect(
     page.getByRole("heading", { name: "삭제 보호 프로젝트", exact: true }),

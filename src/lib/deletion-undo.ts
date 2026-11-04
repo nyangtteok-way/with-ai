@@ -1,18 +1,150 @@
 import {
   MAX_CARDS,
   MAX_PROJECTS,
+  parseBackup,
   type AppData,
   type Card,
   type Project,
 } from "./model";
 
+export const DELETION_UNDO_KEY = "with-ai:deletion-undo:v1";
+
 export type DeletionUndo =
   | { kind: "project"; project: Project; index: number }
   | { kind: "card"; projectId: string; card: Card; index: number };
 
+type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+interface StoredDeletionUndo {
+  version: 1;
+  savedAt: string;
+  undo: DeletionUndo;
+}
+
 type RestoreDeletionResult =
   | { ok: true; data: AppData; projectId: string }
   | { ok: false; message: string };
+
+function getStorage(storage?: StorageLike): StorageLike {
+  return storage ?? globalThis.sessionStorage;
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function validIndex(value: unknown, max: number): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= 0 &&
+    value <= max
+  );
+}
+
+function validDate(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/.test(value) &&
+    Number.isFinite(Date.parse(value))
+  );
+}
+
+function parseStoredDeletion(value: unknown): DeletionUndo | null {
+  const stored = objectValue(value);
+  const undo = objectValue(stored?.undo);
+  if (stored?.version !== 1 || !validDate(stored.savedAt) || !undo) return null;
+
+  if (undo.kind === "project") {
+    if (!validIndex(undo.index, MAX_PROJECTS)) return null;
+    const project = parseBackup(
+      JSON.stringify({ version: 1, projects: [undo.project] }),
+    ).projects[0];
+    return project
+      ? { kind: "project", project, index: undo.index }
+      : null;
+  }
+
+  if (undo.kind === "card") {
+    if (
+      !validIndex(undo.index, MAX_CARDS) ||
+      typeof undo.projectId !== "string"
+    )
+      return null;
+    const card = objectValue(undo.card);
+    if (!card) return null;
+    const project = parseBackup(
+      JSON.stringify({
+        version: 1,
+        projects: [
+          {
+            id: undo.projectId,
+            name: "삭제 복원 대상",
+            description: "",
+            createdAt: card.createdAt,
+            updatedAt: card.updatedAt,
+            cards: [card],
+          },
+        ],
+      }),
+    ).projects[0];
+    return project?.cards[0]
+      ? {
+          kind: "card",
+          projectId: project.id,
+          card: project.cards[0],
+          index: undo.index,
+        }
+      : null;
+  }
+
+  return null;
+}
+
+export function loadDeletionUndo(storage?: StorageLike): DeletionUndo | null {
+  let target: StorageLike | null = null;
+  try {
+    target = getStorage(storage);
+    const raw = target.getItem(DELETION_UNDO_KEY);
+    if (raw === null) return null;
+    const undo = parseStoredDeletion(JSON.parse(raw));
+    if (undo) return undo;
+  } catch {
+    // 손상되거나 접근할 수 없는 임시 값은 복구 데이터로 사용하지 않는다.
+  }
+  try {
+    target?.removeItem(DELETION_UNDO_KEY);
+  } catch {
+    // 저장소 접근이 막혀도 앱 본문 데이터는 계속 사용할 수 있다.
+  }
+  return null;
+}
+
+export function saveDeletionUndo(
+  undo: DeletionUndo,
+  storage?: StorageLike,
+  savedAt = new Date().toISOString(),
+) {
+  try {
+    if (!validDate(savedAt)) return false;
+    const stored: StoredDeletionUndo = { version: 1, savedAt, undo };
+    getStorage(storage).setItem(DELETION_UNDO_KEY, JSON.stringify(stored));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function removeDeletionUndo(storage?: StorageLike) {
+  try {
+    getStorage(storage).removeItem(DELETION_UNDO_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 function cardCount(data: AppData) {
   return data.projects.reduce((count, project) => count + project.cards.length, 0);

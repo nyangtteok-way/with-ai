@@ -1,13 +1,32 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import {
+  DELETION_UNDO_KEY,
+  loadDeletionUndo,
+  removeDeletionUndo,
   restoreDeletion,
+  saveDeletionUndo,
   type DeletionUndo,
 } from "../src/lib/deletion-undo";
 import { MAX_PROJECTS, type AppData, type Card, type Project } from "../src/lib/model";
 
 const stamp = "2026-11-03T23:00:00.000Z";
 const restoredAt = "2026-11-03T23:30:00.000Z";
+
+function memoryStorage() {
+  const values = new Map<string, string>();
+  return {
+    getItem(key: string) {
+      return values.get(key) ?? null;
+    },
+    setItem(key: string, value: string) {
+      values.set(key, value);
+    },
+    removeItem(key: string) {
+      values.delete(key);
+    },
+  };
+}
 
 function card(id: string, title: string): Card {
   return {
@@ -126,4 +145,61 @@ test("대상이 사라졌거나 식별자가 겹치거나 프로젝트 한도를
     restoredAt,
   );
   assert.equal(limited.ok, false);
+});
+
+test("최근 삭제 1건을 탭 임시 저장소에서 검증해 다시 읽고 명시적으로 정리한다", () => {
+  const storage = memoryStorage();
+  const undo: DeletionUndo = {
+    kind: "project",
+    project: project("removed", "되돌릴 프로젝트", [
+      card("removed-card", "되돌릴 카드"),
+    ]),
+    index: 2,
+  };
+
+  assert.equal(saveDeletionUndo(undo, storage, restoredAt), true);
+  assert.ok(storage.getItem(DELETION_UNDO_KEY));
+  assert.deepEqual(loadDeletionUndo(storage), undo);
+  assert.equal(removeDeletionUndo(storage), true);
+  assert.equal(loadDeletionUndo(storage), null);
+});
+
+test("손상되거나 저장할 수 없는 삭제 임시 값은 복구 데이터로 사용하지 않는다", () => {
+  const storage = memoryStorage();
+  storage.setItem(
+    DELETION_UNDO_KEY,
+    JSON.stringify({
+      version: 1,
+      savedAt: restoredAt,
+      undo: {
+        kind: "card",
+        projectId: "target",
+        card: { id: "broken" },
+        index: 0,
+      },
+    }),
+  );
+  assert.equal(loadDeletionUndo(storage), null);
+  assert.equal(storage.getItem(DELETION_UNDO_KEY), null);
+
+  const unavailable = {
+    getItem() {
+      throw new Error("blocked");
+    },
+    setItem() {
+      throw new Error("blocked");
+    },
+    removeItem() {
+      throw new Error("blocked");
+    },
+  };
+  const undo: DeletionUndo = {
+    kind: "card",
+    projectId: "target",
+    card: card("removed-card", "되돌릴 카드"),
+    index: 0,
+  };
+  assert.equal(saveDeletionUndo(undo, unavailable, restoredAt), false);
+  assert.equal(loadDeletionUndo(unavailable), null);
+  assert.equal(removeDeletionUndo(unavailable), false);
 });
