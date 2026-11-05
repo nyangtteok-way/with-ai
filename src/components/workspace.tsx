@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowDownToLine,
@@ -133,10 +133,11 @@ type ToastState = {
   text: string;
   error?: boolean;
   undo?: DeletionUndo;
+  focusUndo?: boolean;
 };
 function deletionToast(
   undo: DeletionUndo,
-  options: { resumed?: boolean; saved?: boolean } = {},
+  options: { resumed?: boolean; saved?: boolean; focusUndo?: boolean } = {},
 ): ToastState {
   if (options.resumed)
     return {
@@ -145,6 +146,7 @@ function deletionToast(
           ? "새로고침 전에 삭제한 프로젝트와 저장 데이터를 되돌릴 수 있어요."
           : "새로고침 전에 삭제한 카드와 저장한 진행 메모를 되돌릴 수 있어요.",
       undo,
+      focusUndo: options.focusUndo,
     };
   if (options.saved)
     return {
@@ -153,6 +155,7 @@ function deletionToast(
           ? "프로젝트와 저장한 작업을 삭제했어요. 같은 탭에서는 새로고침해도 되돌릴 수 있어요."
           : "카드와 저장한 진행 메모를 삭제했어요. 같은 탭에서는 새로고침해도 되돌릴 수 있어요.",
       undo,
+      focusUndo: options.focusUndo,
     };
   return {
     text:
@@ -160,6 +163,7 @@ function deletionToast(
         ? "프로젝트와 저장한 작업을 삭제했어요. 지금 화면에서만 되돌릴 수 있어요."
         : "카드와 저장한 진행 메모를 삭제했어요. 지금 화면에서만 되돌릴 수 있어요.",
     undo,
+    focusUndo: options.focusUndo,
   };
 }
 function download(text: string, filename: string) {
@@ -237,6 +241,14 @@ export function Workspace() {
   });
   const fileRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const undoActionRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!toast?.undo || !toast.focusUndo) return;
+    const frame = window.requestAnimationFrame(() => {
+      undoActionRef.current?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [toast]);
   const activeId = resolveActiveProjectId(
     data.projects,
     selectedActiveId ?? initialActiveId,
@@ -621,7 +633,12 @@ export function Workspace() {
         project: removed,
         index,
       };
-      setToast(deletionToast(undo, { saved: saveDeletionUndo(undo) }));
+      setToast(
+        deletionToast(undo, {
+          saved: saveDeletionUndo(undo),
+          focusUndo: true,
+        }),
+      );
     }
   }
   function removeCard(id: string) {
@@ -652,7 +669,12 @@ export function Workspace() {
         card: removed,
         index,
       };
-      setToast(deletionToast(undo, { saved: saveDeletionUndo(undo) }));
+      setToast(
+        deletionToast(undo, {
+          saved: saveDeletionUndo(undo),
+          focusUndo: true,
+        }),
+      );
     }
   }
   function undoDeletion(undo: DeletionUndo) {
@@ -870,6 +892,7 @@ export function Workspace() {
       className={`toast ${toast.error ? "toast-error" : ""}`}
       role={toast.error ? "alert" : "status"}
       aria-live="polite"
+      aria-atomic="true"
       aria-label="작업 알림"
     >
       <span>
@@ -878,6 +901,7 @@ export function Workspace() {
       <p>{toast.text}</p>
       {toast.undo && (
         <button
+          ref={undoActionRef}
           className="toast-action"
           onClick={() => undoDeletion(toast.undo!)}
         >

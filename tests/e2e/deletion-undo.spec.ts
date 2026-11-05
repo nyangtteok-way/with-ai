@@ -45,6 +45,8 @@ test("삭제한 카드와 프로젝트의 저장 데이터를 직후 되돌린�
 
   const undo = page.getByRole("button", { name: "되돌리기", exact: true });
   await expect(undo).toBeVisible();
+  await expect(undo).toBeFocused();
+  await expect(page.locator(".toast")).toHaveAttribute("aria-atomic", "true");
   expect((await undo.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   expect(
     await page.evaluate(() =>
@@ -53,6 +55,7 @@ test("삭제한 카드와 프로젝트의 저장 데이터를 직후 되돌린�
   ).not.toBeNull();
   await page.reload();
   await expect(undo).toBeVisible();
+  await expect(undo).not.toBeFocused();
   await expect(page.locator(".toast")).toContainText("새로고침 전에 삭제한");
   await undo.click();
   await expect(
@@ -96,6 +99,7 @@ test("삭제한 카드와 프로젝트의 저장 데이터를 직후 되돌린�
   await expect(
     page.getByRole("button", { name: "첫 프로젝트 만들기", exact: true }),
   ).toBeVisible();
+  await expect(undo).toBeFocused();
 
   for (const width of [320, 390]) {
     await page.setViewportSize({ width, height: 844 });
@@ -106,6 +110,7 @@ test("삭제한 카드와 프로젝트의 저장 데이터를 직후 되돌린�
   }
   await page.reload();
   await expect(undo).toBeVisible();
+  await expect(undo).not.toBeFocused();
   await expect(page.locator(".toast")).toContainText("새로고침 전에 삭제한");
   await undo.click();
   await expect(
