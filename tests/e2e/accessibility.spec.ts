@@ -237,4 +237,16 @@ test("모바일의 주요 조작 영역과 현재 프로젝트 의미를 분명�
     detailDialog.getByRole("button", { name: "알림 닫기" }),
     44,
   );
+
+  await detailDialog
+    .getByRole("button", { name: "AI 작업 요청문", exact: true })
+    .click();
+  const promptDialog = page.getByRole("dialog", { name: "AI 작업 요청문" });
+  const promptBack = promptDialog.getByRole("button", {
+    name: "카드로 돌아가기",
+    exact: true,
+  });
+  await expectTouchTargetsAtLeast(promptBack, 44);
+  await page.setViewportSize({ width: 320, height: 844 });
+  await expectTouchTargetsAtLeast(promptBack, 44);
 });

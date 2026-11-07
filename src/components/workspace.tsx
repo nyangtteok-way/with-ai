@@ -1490,7 +1490,7 @@ export function Workspace() {
           wide
         >
           <button
-            className="text-button button small"
+            className="text-button button small prompt-back"
             onClick={() =>
               requestModal({ kind: "detail", cardId: selectedCard.id })
             }

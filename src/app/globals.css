@@ -1859,6 +1859,9 @@ input[aria-invalid="true"] {
   .detail-actions .button {
     min-height: 44px;
   }
+  .prompt-back {
+    min-height: 44px;
+  }
   .mobile-bottom {
     display: flex;
     align-items: center;
