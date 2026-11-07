@@ -246,7 +246,9 @@ test("모바일의 주요 조작 영역과 현재 프로젝트 의미를 분명�
     name: "카드로 돌아가기",
     exact: true,
   });
+  await expectAaTextContrast(promptDialog.locator(".copy-status"));
   await expectTouchTargetsAtLeast(promptBack, 44);
   await page.setViewportSize({ width: 320, height: 844 });
+  await expectAaTextContrast(promptDialog.locator(".copy-status"));
   await expectTouchTargetsAtLeast(promptBack, 44);
 });
