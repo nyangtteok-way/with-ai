@@ -22,6 +22,7 @@ export function Dialog({
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  const descriptionId = useId();
   useEffect(() => {
     const dialog = ref.current!;
     const previous = document.activeElement as HTMLElement | null;
@@ -44,6 +45,7 @@ export function Dialog({
     <dialog
       ref={ref}
       aria-labelledby={titleId}
+      aria-describedby={subtitle ? descriptionId : undefined}
       className={`dialog ${wide ? "dialog-wide" : ""}`}
       onCancel={(event) => {
         event.preventDefault();
@@ -53,7 +55,7 @@ export function Dialog({
       <div className="dialog-heading">
         <div>
           <h2 id={titleId}>{title}</h2>
-          {subtitle && <p>{subtitle}</p>}
+          {subtitle && <p id={descriptionId}>{subtitle}</p>}
         </div>
         <button className="icon-button" aria-label="닫기" onClick={onClose}>
           <X size={20} />

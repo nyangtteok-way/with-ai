@@ -216,6 +216,9 @@ test("모바일의 주요 조작 영역과 현재 프로젝트 의미를 분명�
     "true",
   );
   const projectDialog = page.getByRole("dialog", { name: "내 프로젝트" });
+  await expect(projectDialog).toHaveAccessibleDescription(
+    "진행할 프로젝트를 선택하세요.",
+  );
   const currentProject = projectDialog.locator(
     '.project-nav[aria-current="true"]',
   );
@@ -242,6 +245,9 @@ test("모바일의 주요 조작 영역과 현재 프로젝트 의미를 분명�
     .getByRole("button", { name: "AI 작업 요청문", exact: true })
     .click();
   const promptDialog = page.getByRole("dialog", { name: "AI 작업 요청문" });
+  await expect(promptDialog).toHaveAccessibleDescription(
+    "미리 확인하고 수정한 뒤 복사하세요.",
+  );
   const promptBack = promptDialog.getByRole("button", {
     name: "카드로 돌아가기",
     exact: true,
